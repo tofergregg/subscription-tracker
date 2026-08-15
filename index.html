@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Subscription Tracker</title>
+<style>
+  :root {
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --ink: #1f2733;
+    --muted: #6b7688;
+    --line: #e4e8f0;
+    --brand: #4f6df5;
+    --brand-soft: #eef1fe;
+    --green: #1faa6c;
+    --green-soft: #e6f6ef;
+    --amber: #d98a12;
+    --amber-soft: #fdf3e2;
+    --red: #d94848;
+    --red-soft: #fdeaea;
+    --shadow: 0 1px 3px rgba(20,30,60,.08), 0 6px 20px rgba(20,30,60,.06);
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.5;
+    padding: 20px 16px 60px;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; }
+  header.app { margin-bottom: 20px; }
+  header.app h1 { font-size: 1.7rem; margin: 0 0 4px; }
+  header.app p { margin: 0; color: var(--muted); font-size: .95rem; }
+
+  /* Totals */
+  .totals { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 22px; }
+  .total-card {
+    background: var(--card); border-radius: var(--radius); padding: 18px 20px;
+    box-shadow: var(--shadow); border-top: 4px solid var(--brand);
+  }
+  .total-card.year { border-top-color: var(--green); }
+  .total-card .label { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .total-card .value { font-size: 1.9rem; font-weight: 700; margin-top: 4px; }
+  .total-card.year .value { color: var(--green); }
+  .total-card .value { color: var(--brand); }
+
+  /* Form */
+  .panel {
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 20px; margin-bottom: 22px;
+  }
+  .panel h2 { margin: 0 0 14px; font-size: 1.1rem; }
+  form.add { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field.wide { grid-column: 1 / -1; }
+  label { font-size: .82rem; color: var(--muted); font-weight: 600; }
+  input, select {
+    font: inherit; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 9px; background: #fff; color: var(--ink); width: 100%;
+  }
+  input:focus, select:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+  .actions { grid-column: 1 / -1; display: flex; gap: 10px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; border: none;
+    border-radius: 9px; padding: 11px 18px;
+  }
+  .btn-primary { background: var(--brand); color: #fff; }
+  .btn-primary:hover { filter: brightness(1.05); }
+  .btn-ghost { background: var(--brand-soft); color: var(--brand); }
+  .btn-ghost:hover { background: #e2e7fe; }
+
+  /* List */
+  .list-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .list-head h2 { margin: 0; font-size: 1.1rem; }
+  .count { color: var(--muted); font-size: .9rem; }
+
+  .empty { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 40px 20px; text-align: center; color: var(--muted); }
+
+  .sub {
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 16px 18px; margin-bottom: 12px; border-left: 5px solid var(--line);
+    display: grid; grid-template-columns: 1fr auto; gap: 8px 14px; align-items: center;
+  }
+  .sub.renew-soon { border-left-color: var(--amber); background: linear-gradient(0deg, var(--amber-soft), var(--amber-soft)) , var(--card); }
+  .sub.cancel-soon { border-left-color: var(--red); }
+  .sub .name { font-weight: 700; font-size: 1.05rem; }
+  .sub .meta { color: var(--muted); font-size: .9rem; margin-top: 2px; }
+  .sub .cost-col { text-align: right; }
+  .sub .cost { font-weight: 700; }
+  .sub .per { color: var(--muted); font-size: .8rem; }
+
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .badge { font-size: .72rem; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+  .badge.soon { background: var(--amber-soft); color: var(--amber); }
+  .badge.cancel { background: var(--red-soft); color: var(--red); }
+  .badge.love { background: var(--green-soft); color: var(--green); }
+  .badge.like { background: var(--brand-soft); color: var(--brand); }
+  .badge.meh { background: #eef0f4; color: var(--muted); }
+
+  .row-actions { grid-column: 1 / -1; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
+  .link-btn { background: none; padding: 4px 8px; font-size: .85rem; font-weight: 600; }
+  .link-btn.edit { color: var(--brand); }
+  .link-btn.del { color: var(--red); }
+  .link-btn:hover { text-decoration: underline; }
+
+  footer.note { text-align: center; color: var(--muted); font-size: .82rem; margin-top: 30px; }
+
+  /* Undo bar */
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 140%);
+    background: var(--ink); color: #fff; border-radius: 12px; padding: 12px 14px 12px 18px;
+    box-shadow: var(--shadow); display: flex; align-items: center; gap: 14px;
+    font-size: .92rem; max-width: 92%; opacity: 0; transition: transform .25s ease, opacity .25s ease;
+    z-index: 100;
+  }
+  #toast.show { transform: translate(-50%, 0); opacity: 1; }
+  #toast .toast-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #toast button {
+    background: transparent; color: #9fb2ff; font-weight: 700; padding: 6px 10px;
+    border-radius: 8px; flex-shrink: 0;
+  }
+  #toast button:hover { background: rgba(255,255,255,.1); }
+
+  @media (max-width: 560px) {
+    .totals { grid-template-columns: 1fr; }
+    form.add { grid-template-columns: 1fr; }
+    .total-card .value { font-size: 1.6rem; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="app">
+    <h1>Subscription Tracker</h1>
+    <p>Track what you pay, spot renewals, and decide what to cut. Saved on this device only.</p>
+  </header>
+
+  <section class="totals">
+    <div class="total-card month">
+      <div class="label">Monthly total</div>
+      <div class="value" id="monthlyTotal">$0.00</div>
+    </div>
+    <div class="total-card year">
+      <div class="label">Yearly total</div>
+      <div class="value" id="yearlyTotal">$0.00</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2 id="formTitle">Add a subscription</h2>
+    <form class="add" id="subForm">
+      <div class="field">
+        <label for="name">Name</label>
+        <input id="name" type="text" placeholder="Netflix" required>
+      </div>
+      <div class="field">
+        <label for="cost">Cost ($)</label>
+        <input id="cost" type="number" min="0" step="0.01" placeholder="15.99" required>
+      </div>
+      <div class="field">
+        <label for="frequency">Billed</label>
+        <select id="frequency">
+          <option value="weekly">Weekly</option>
+          <option value="monthly" selected>Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="nextRenewal">Next renewal</label>
+        <input id="nextRenewal" type="date" required>
+      </div>
+      <div class="field wide">
+        <label for="rating">How much do you like it?</label>
+        <select id="rating">
+          <option value="love">Love it</option>
+          <option value="like" selected>Like it</option>
+          <option value="meh">Meh</option>
+          <option value="cancel">Cancel soon</option>
+        </select>
+      </div>
+      <div class="actions">
+        <button type="submit" class="btn-primary" id="submitBtn">Add subscription</button>
+        <button type="button" class="btn-ghost" id="cancelEdit" style="display:none;">Cancel</button>
+      </div>
+    </form>
+  </section>
+
+  <div class="list-head">
+    <h2>Your subscriptions</h2>
+    <span class="count" id="count"></span>
+  </div>
+  <div id="list"></div>
+
+  <footer class="note">
+    Data is stored only in this browser on this device. Clearing your browser data will erase it.
+  </footer>
+</div>
+
+<div id="toast" role="status" aria-live="polite">
+  <span class="toast-msg" id="toastMsg"></span>
+  <button type="button" id="undoBtn">Undo</button>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STORAGE_KEY = "subscriptions_v1";
+  var SOON_DAYS = 14;
+  var WEEKS_PER_MONTH = 52 / 12; // ~4.333
+
+  var subs = [];
+  var editingId = null;
+
+  // ---- Data layer (kept together so it's easy to swap for real storage later) ----
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      subs = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(subs)) subs = [];
+    } catch (e) {
+      subs = [];
+    }
+  }
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(subs));
+    } catch (e) {
+      alert("Could not save to this browser. Your changes may not persist.");
+    }
+  }
+  function makeId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  // ---- Calculations ----
+  function toMonthly(sub) {
+    var c = Number(sub.cost) || 0;
+    if (sub.frequency === "weekly") return c * WEEKS_PER_MONTH;
+    if (sub.frequency === "yearly") return c / 12;
+    return c; // monthly
+  }
+  function money(n) {
+    return "$" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function daysUntil(dateStr) {
+    if (!dateStr) return Infinity;
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var parts = dateStr.split("-");
+    var target = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    target.setHours(0, 0, 0, 0);
+    return Math.round((target - today) / 86400000);
+  }
+
+  var RATING_LABEL = { love: "Love it", like: "Like it", meh: "Meh", cancel: "Cancel soon" };
+  var FREQ_LABEL = { weekly: "Weekly", monthly: "Monthly", yearly: "Yearly" };
+
+  function formatDate(dateStr) {
+    if (!dateStr) return "";
+    var parts = dateStr.split("-");
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+    });
+  }
+
+  // ---- Rendering ----
+  function render() {
+    var monthly = 0;
+    for (var i = 0; i < subs.length; i++) monthly += toMonthly(subs[i]);
+    document.getElementById("monthlyTotal").textContent = money(monthly);
+    document.getElementById("yearlyTotal").textContent = money(monthly * 12);
+
+    var countEl = document.getElementById("count");
+    countEl.textContent = subs.length ? subs.length + (subs.length === 1 ? " service" : " services") : "";
+
+    var list = document.getElementById("list");
+    if (!subs.length) {
+      list.innerHTML = '<div class="empty">No subscriptions yet. Add your first one above.</div>';
+      return;
+    }
+
+    // Sort by soonest renewal
+    var sorted = subs.slice().sort(function (a, b) {
+      return daysUntil(a.nextRenewal) - daysUntil(b.nextRenewal);
+    });
+
+    var html = "";
+    for (var j = 0; j < sorted.length; j++) {
+      var s = sorted[j];
+      var d = daysUntil(s.nextRenewal);
+      var renewSoon = d >= 0 && d <= SOON_DAYS;
+      var cancelSoon = s.rating === "cancel";
+      var classes = "sub" + (cancelSoon ? " cancel-soon" : (renewSoon ? " renew-soon" : ""));
+
+      var badges = "";
+      if (renewSoon) {
+        var when = d === 0 ? "today" : (d === 1 ? "tomorrow" : "in " + d + " days");
+        badges += '<span class="badge soon">Renews ' + when + '</span>';
+      }
+      if (cancelSoon) badges += '<span class="badge cancel">Consider cancelling</span>';
+      else if (s.rating === "love") badges += '<span class="badge love">Love it</span>';
+      else if (s.rating === "like") badges += '<span class="badge like">Like it</span>';
+      else if (s.rating === "meh") badges += '<span class="badge meh">Meh</span>';
+
+      html +=
+        '<div class="' + classes + '">' +
+          '<div class="info">' +
+            '<div class="name">' + escapeHtml(s.name) + '</div>' +
+            '<div class="meta">' + FREQ_LABEL[s.frequency] + ' &middot; Next renewal ' + formatDate(s.nextRenewal) + '</div>' +
+            '<div class="badges">' + badges + '</div>' +
+          '</div>' +
+          '<div class="cost-col">' +
+            '<div class="cost">' + money(Number(s.cost) || 0) + '</div>' +
+            '<div class="per">' + money(toMonthly(s)) + '/mo</div>' +
+          '</div>' +
+          '<div class="row-actions">' +
+            '<button class="link-btn edit" data-edit="' + s.id + '">Edit</button>' +
+            '<button class="link-btn del" data-del="' + s.id + '">Delete</button>' +
+          '</div>' +
+        '</div>';
+    }
+    list.innerHTML = html;
+  }
+
+  // ---- Form handling ----
+  var form = document.getElementById("subForm");
+  var submitBtn = document.getElementById("submitBtn");
+  var cancelEditBtn = document.getElementById("cancelEdit");
+  var formTitle = document.getElementById("formTitle");
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var data = {
+      name: document.getElementById("name").value.trim(),
+      cost: parseFloat(document.getElementById("cost").value),
+      frequency: document.getElementById("frequency").value,
+      nextRenewal: document.getElementById("nextRenewal").value,
+      rating: document.getElementById("rating").value
+    };
+    if (!data.name || isNaN(data.cost) || !data.nextRenewal) return;
+
+    if (editingId) {
+      for (var i = 0; i < subs.length; i++) {
+        if (subs[i].id === editingId) {
+          data.id = editingId;
+          subs[i] = data;
+          break;
+        }
+      }
+      exitEditMode();
+    } else {
+      data.id = makeId();
+      subs.push(data);
+    }
+    save();
+    render();
+    form.reset();
+    document.getElementById("frequency").value = "monthly";
+    document.getElementById("rating").value = "like";
+  });
+
+  function enterEditMode(id) {
+    var s = null;
+    for (var i = 0; i < subs.length; i++) if (subs[i].id === id) s = subs[i];
+    if (!s) return;
+    editingId = id;
+    document.getElementById("name").value = s.name;
+    document.getElementById("cost").value = s.cost;
+    document.getElementById("frequency").value = s.frequency;
+    document.getElementById("nextRenewal").value = s.nextRenewal;
+    document.getElementById("rating").value = s.rating;
+    formTitle.textContent = "Edit subscription";
+    submitBtn.textContent = "Save changes";
+    cancelEditBtn.style.display = "inline-block";
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function exitEditMode() {
+    editingId = null;
+    formTitle.textContent = "Add a subscription";
+    submitBtn.textContent = "Add subscription";
+    cancelEditBtn.style.display = "none";
+    form.reset();
+    document.getElementById("frequency").value = "monthly";
+    document.getElementById("rating").value = "like";
+  }
+  cancelEditBtn.addEventListener("click", exitEditMode);
+
+  document.getElementById("list").addEventListener("click", function (e) {
+    var editId = e.target.getAttribute("data-edit");
+    var delId = e.target.getAttribute("data-del");
+    if (editId) enterEditMode(editId);
+    if (delId) {
+      var idx = -1;
+      for (var i = 0; i < subs.length; i++) if (subs[i].id === delId) idx = i;
+      if (idx === -1) return;
+      var removed = subs[idx];
+      subs.splice(idx, 1);
+      if (editingId === delId) exitEditMode();
+      save();
+      render();
+      showUndo(removed, idx);
+    }
+  });
+
+  // ---- Undo bar ----
+  var toast = document.getElementById("toast");
+  var toastMsg = document.getElementById("toastMsg");
+  var undoBtn = document.getElementById("undoBtn");
+  var lastDeleted = null;
+  var lastIndex = -1;
+  var toastTimer = null;
+
+  function showUndo(item, index) {
+    lastDeleted = item;
+    lastIndex = index;
+    toastMsg.textContent = 'Deleted "' + item.name + '"';
+    toast.classList.add("show");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideUndo, 6000);
+  }
+  function hideUndo() {
+    toast.classList.remove("show");
+    lastDeleted = null;
+    lastIndex = -1;
+    if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+  }
+  undoBtn.addEventListener("click", function () {
+    if (!lastDeleted) return;
+    var at = (lastIndex >= 0 && lastIndex <= subs.length) ? lastIndex : subs.length;
+    subs.splice(at, 0, lastDeleted);
+    save();
+    render();
+    hideUndo();
+  });
+
+  // ---- Init ----
+  load();
+  render();
+})();
+</script>
+</body>
+</html>
