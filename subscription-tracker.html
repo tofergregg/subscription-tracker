@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Subscription Tracker</title>
+<style>
+  :root {
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --ink: #1c2333;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --accent: #3b5bdb;
+    --accent-soft: #eef2ff;
+    --warn: #b45309;
+    --warn-soft: #fff7ed;
+    --danger: #b91c1c;
+    --danger-soft: #fef2f2;
+    --shadow: 0 1px 3px rgba(16,24,40,.08), 0 1px 2px rgba(16,24,40,.04);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.45;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+
+  header.app { margin-bottom: 20px; }
+  header.app h1 { font-size: 1.55rem; margin: 0 0 4px; }
+  header.app p { margin: 0; color: var(--muted); font-size: .95rem; }
+
+  /* Summary cards */
+  .summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 18px 0;
+  }
+  .summary .box {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: var(--shadow);
+  }
+  .summary .label { color: var(--muted); font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; }
+  .summary .value { font-size: 1.7rem; font-weight: 700; margin-top: 4px; }
+  .summary .sub { color: var(--muted); font-size: .8rem; margin-top: 2px; }
+
+  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0 14px; }
+  .toolbar .count { color: var(--muted); font-size: .9rem; }
+
+  button {
+    font: inherit;
+    cursor: pointer;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    padding: 9px 14px;
+  }
+  button.primary { background: var(--accent); color: #fff; }
+  button.primary:hover { background: #30489e; }
+  button.ghost { background: transparent; border-color: var(--line); color: var(--ink); }
+  button.ghost:hover { background: #f0f2f7; }
+  button.small { padding: 6px 10px; font-size: .85rem; }
+
+  /* Subscription list */
+  .list { display: flex; flex-direction: column; gap: 12px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 5px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .card.cancel { border-left-color: var(--danger); background: var(--danger-soft); }
+  .card .name { font-weight: 650; font-size: 1.05rem; }
+  .card .meta { color: var(--muted); font-size: .9rem; margin-top: 3px; }
+  .card .cost { font-weight: 700; white-space: nowrap; }
+  .card .cost .per { color: var(--muted); font-weight: 400; font-size: .82rem; }
+  .card .left { min-width: 0; }
+  .card .right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .badge {
+    display: inline-block;
+    font-size: .74rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+  }
+  .badge.rating { background: var(--accent-soft); color: var(--accent); }
+  .badge.rating.cancel { background: #fee2e2; color: var(--danger); }
+  .badge.soon { background: var(--warn-soft); color: var(--warn); border-color: #fed7aa; }
+
+  .row-actions { display: flex; gap: 8px; }
+
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    background: var(--card);
+    border: 1px dashed var(--line);
+    border-radius: 12px;
+    padding: 40px 20px;
+  }
+
+  /* Modal form */
+  .backdrop {
+    position: fixed; inset: 0;
+    background: rgba(16,24,40,.45);
+    display: none;
+    align-items: center; justify-content: center;
+    padding: 16px;
+    z-index: 50;
+  }
+  .backdrop.open { display: flex; }
+  .modal {
+    background: var(--card);
+    border-radius: 14px;
+    width: 100%; max-width: 460px;
+    padding: 20px;
+    box-shadow: 0 20px 40px rgba(16,24,40,.25);
+  }
+  .modal h2 { margin: 0 0 14px; font-size: 1.2rem; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: .85rem; font-weight: 600; margin-bottom: 4px; }
+  .field input, .field select {
+    width: 100%;
+    font: inherit;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #fff;
+    color: var(--ink);
+  }
+  .field .hint { color: var(--muted); font-size: .78rem; margin-top: 3px; }
+  .field .error { color: var(--danger); font-size: .8rem; margin-top: 4px; display: none; }
+  .field.invalid input, .field.invalid select { border-color: var(--danger); }
+  .field.invalid .error { display: block; }
+  .modal .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+
+  @media (max-width: 560px) {
+    .summary { grid-template-columns: 1fr; }
+    .card { flex-direction: column; }
+    .card .right { text-align: left; align-items: flex-start; width: 100%; }
+    .row-actions { width: 100%; }
+    .row-actions button { flex: 1; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="app">
+    <h1>Subscription Tracker</h1>
+    <p>Track your recurring subscriptions. Everything is saved in this browser on this device.</p>
+  </header>
+
+  <section class="summary" aria-label="Cost summary">
+    <div class="box">
+      <div class="label">Total monthly</div>
+      <div class="value" id="totalMonthly">$0.00</div>
+      <div class="sub">Yearly plans counted as 1/12 per month</div>
+    </div>
+    <div class="box">
+      <div class="label">Total yearly</div>
+      <div class="value" id="totalYearly">$0.00</div>
+      <div class="sub">Annualized estimate (monthly &times; 12)</div>
+    </div>
+  </section>
+
+  <div class="toolbar">
+    <span class="count" id="count">0 subscriptions</span>
+    <button class="primary" id="addBtn">+ Add subscription</button>
+  </div>
+
+  <div class="list" id="list"></div>
+</div>
+
+<!-- Add / Edit modal -->
+<div class="backdrop" id="backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h2 id="modalTitle">Add subscription</h2>
+    <form id="subForm" novalidate>
+      <input type="hidden" id="editId">
+      <div class="field" id="f-name">
+        <label for="name">Name</label>
+        <input type="text" id="name" placeholder="e.g. Streamly" maxlength="60">
+        <div class="error">Please enter a name.</div>
+      </div>
+      <div class="field" id="f-cost">
+        <label for="cost">Cost (USD)</label>
+        <input type="number" id="cost" step="0.01" min="0" placeholder="e.g. 9.99">
+        <div class="error">Please enter a cost of 0 or more.</div>
+      </div>
+      <div class="field" id="f-freq">
+        <label for="frequency">Billing frequency</label>
+        <select id="frequency">
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </div>
+      <div class="field" id="f-date">
+        <label for="renewal">Next renewal date</label>
+        <input type="date" id="renewal">
+        <div class="error">Please choose a renewal date.</div>
+      </div>
+      <div class="field" id="f-rating">
+        <label for="rating">Usage rating</label>
+        <select id="rating">
+          <option value="Love it">Love it</option>
+          <option value="Like it">Like it</option>
+          <option value="Meh">Meh</option>
+          <option value="Cancel soon">Cancel soon</option>
+        </select>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" id="cancelBtn">Cancel</button>
+        <button type="submit" class="primary" id="saveBtn">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STORAGE_KEY = "subscription-tracker.v1";
+
+  // ---- Sample (fictional) data, used only on first run ----
+  function sampleData() {
+    var today = new Date();
+    function inDays(n) {
+      var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + n);
+      return d.toISOString().slice(0, 10);
+    }
+    return [
+      { id: uid(), name: "Streamly",        cost: 15.99, frequency: "monthly", renewal: inDays(6),  rating: "Love it" },
+      { id: uid(), name: "CloudVault Pro",  cost: 99.00, frequency: "yearly",  renewal: inDays(40), rating: "Like it" },
+      { id: uid(), name: "FitTrack+",       cost: 29.99, frequency: "monthly", renewal: inDays(11), rating: "Cancel soon" },
+      { id: uid(), name: "NewsWire Daily",  cost: 6.50,  frequency: "monthly", renewal: inDays(21), rating: "Meh" },
+      { id: uid(), name: "PixelEdit Studio",cost: 120.00,frequency: "yearly",  renewal: inDays(3),  rating: "Like it" }
+    ];
+  }
+
+  // ---- State + storage ----
+  var subs = [];
+
+  function uid() {
+    return "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+  }
+
+  function load() {
+    var raw = null;
+    try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { raw = null; }
+    if (raw === null) {
+      subs = sampleData();
+      save();
+      return;
+    }
+    try {
+      var parsed = JSON.parse(raw);
+      subs = Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      subs = [];
+    }
+  }
+
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(subs)); } catch (e) { /* ignore */ }
+  }
+
+  // ---- Helpers ----
+  function money(n) {
+    return "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function monthlyEquivalent(sub) {
+    return sub.frequency === "yearly" ? sub.cost / 12 : sub.cost;
+  }
+
+  function daysUntil(dateStr) {
+    var parts = dateStr.split("-");
+    var target = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    var now = new Date();
+    var todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var ms = target - todayMid;
+    return Math.round(ms / 86400000);
+  }
+
+  function formatDate(dateStr) {
+    var parts = dateStr.split("-");
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  // ---- Rendering ----
+  var listEl = document.getElementById("list");
+  var totalMonthlyEl = document.getElementById("totalMonthly");
+  var totalYearlyEl = document.getElementById("totalYearly");
+  var countEl = document.getElementById("count");
+
+  function render() {
+    // Totals
+    var monthlyTotal = subs.reduce(function (acc, s) { return acc + monthlyEquivalent(s); }, 0);
+    totalMonthlyEl.textContent = money(monthlyTotal);
+    totalYearlyEl.textContent = money(monthlyTotal * 12);
+
+    countEl.textContent = subs.length + (subs.length === 1 ? " subscription" : " subscriptions");
+
+    // List, sorted by highest monthly-equivalent cost first
+    var sorted = subs.slice().sort(function (a, b) {
+      return monthlyEquivalent(b) - monthlyEquivalent(a);
+    });
+
+    if (sorted.length === 0) {
+      listEl.innerHTML = '<div class="empty">No subscriptions yet. Click &ldquo;Add subscription&rdquo; to get started.</div>';
+      return;
+    }
+
+    listEl.innerHTML = "";
+    sorted.forEach(function (s) {
+      var days = daysUntil(s.renewal);
+      var soon = days >= 0 && days <= 14;
+      var isCancel = s.rating === "Cancel soon";
+
+      var card = document.createElement("div");
+      card.className = "card" + (isCancel ? " cancel" : "");
+
+      var perLabel = s.frequency === "yearly" ? "/year" : "/month";
+
+      var soonBadge = soon
+        ? '<span class="badge soon">Renews in ' + days + (days === 1 ? " day" : " days") + '</span>'
+        : "";
+      var ratingBadge = '<span class="badge rating' + (isCancel ? " cancel" : "") + '">' + escapeHtml(s.rating) + '</span>';
+
+      card.innerHTML =
+        '<div class="left">' +
+          '<div class="name">' + escapeHtml(s.name) + '</div>' +
+          '<div class="meta">Renews ' + formatDate(s.renewal) + '</div>' +
+          '<div class="badges">' + ratingBadge + soonBadge + '</div>' +
+        '</div>' +
+        '<div class="right">' +
+          '<div class="cost">' + money(s.cost) + '<span class="per"> ' + perLabel + '</span></div>' +
+          '<div class="row-actions">' +
+            '<button class="ghost small" data-edit="' + s.id + '">Edit</button>' +
+            '<button class="ghost small" data-delete="' + s.id + '">Delete</button>' +
+          '</div>' +
+        '</div>';
+
+      listEl.appendChild(card);
+    });
+  }
+
+  // ---- Modal + form ----
+  var backdrop = document.getElementById("backdrop");
+  var form = document.getElementById("subForm");
+  var modalTitle = document.getElementById("modalTitle");
+  var editIdField = document.getElementById("editId");
+  var nameEl = document.getElementById("name");
+  var costEl = document.getElementById("cost");
+  var freqEl = document.getElementById("frequency");
+  var renewalEl = document.getElementById("renewal");
+  var ratingEl = document.getElementById("rating");
+
+  function openModal(sub) {
+    clearErrors();
+    if (sub) {
+      modalTitle.textContent = "Edit subscription";
+      editIdField.value = sub.id;
+      nameEl.value = sub.name;
+      costEl.value = sub.cost;
+      freqEl.value = sub.frequency;
+      renewalEl.value = sub.renewal;
+      ratingEl.value = sub.rating;
+    } else {
+      modalTitle.textContent = "Add subscription";
+      editIdField.value = "";
+      form.reset();
+      freqEl.value = "monthly";
+      ratingEl.value = "Love it";
+    }
+    backdrop.classList.add("open");
+    nameEl.focus();
+  }
+
+  function closeModal() {
+    backdrop.classList.remove("open");
+  }
+
+  function clearErrors() {
+    ["f-name", "f-cost", "f-date"].forEach(function (id) {
+      document.getElementById(id).classList.remove("invalid");
+    });
+  }
+
+  function validate() {
+    clearErrors();
+    var ok = true;
+    if (nameEl.value.trim() === "") {
+      document.getElementById("f-name").classList.add("invalid"); ok = false;
+    }
+    var costVal = parseFloat(costEl.value);
+    if (isNaN(costVal) || costVal < 0) {
+      document.getElementById("f-cost").classList.add("invalid"); ok = false;
+    }
+    if (renewalEl.value === "") {
+      document.getElementById("f-date").classList.add("invalid"); ok = false;
+    }
+    return ok;
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (!validate()) return;
+
+    var record = {
+      name: nameEl.value.trim(),
+      cost: Math.round(parseFloat(costEl.value) * 100) / 100,
+      frequency: freqEl.value,
+      renewal: renewalEl.value,
+      rating: ratingEl.value
+    };
+
+    var id = editIdField.value;
+    if (id) {
+      subs = subs.map(function (s) {
+        return s.id === id ? { id: id, name: record.name, cost: record.cost, frequency: record.frequency, renewal: record.renewal, rating: record.rating } : s;
+      });
+    } else {
+      record.id = uid();
+      subs.push(record);
+    }
+    save();
+    render();
+    closeModal();
+  });
+
+  // ---- Events ----
+  document.getElementById("addBtn").addEventListener("click", function () { openModal(null); });
+  document.getElementById("cancelBtn").addEventListener("click", closeModal);
+  backdrop.addEventListener("click", function (e) {
+    if (e.target === backdrop) closeModal();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && backdrop.classList.contains("open")) closeModal();
+  });
+
+  listEl.addEventListener("click", function (e) {
+    var editId = e.target.getAttribute("data-edit");
+    var deleteId = e.target.getAttribute("data-delete");
+    if (editId) {
+      var sub = subs.find(function (s) { return s.id === editId; });
+      if (sub) openModal(sub);
+    } else if (deleteId) {
+      var target = subs.find(function (s) { return s.id === deleteId; });
+      var label = target ? target.name : "this subscription";
+      if (window.confirm('Delete "' + label + '"?')) {
+        subs = subs.filter(function (s) { return s.id !== deleteId; });
+        save();
+        render();
+      }
+    }
+  });
+
+  // ---- Start ----
+  load();
+  render();
+})();
+</script>
+</body>
+</html>
