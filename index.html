@@ -17,6 +17,7 @@
     --warn-soft: #fff7ed;
     --danger: #b91c1c;
     --danger-soft: #fef2f2;
+    --ok: #047857;
     --shadow: 0 1px 3px rgba(16,24,40,.08), 0 1px 2px rgba(16,24,40,.04);
   }
   * { box-sizing: border-box; }
@@ -29,9 +30,39 @@
   }
   .wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
 
-  header.app { margin-bottom: 20px; }
+  /* Views are swapped by adding/removing .hidden */
+  .hidden { display: none !important; }
+
+  header.app { margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
   header.app h1 { font-size: 1.55rem; margin: 0 0 4px; }
   header.app p { margin: 0; color: var(--muted); font-size: .95rem; }
+  header.app .who { text-align: right; font-size: .82rem; color: var(--muted); white-space: nowrap; }
+  header.app .who .email { display: block; margin-bottom: 6px; overflow-wrap: anywhere; white-space: normal; }
+
+  /* ---- Boot / sign-in screens ---- */
+  .center-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    max-width: 420px;
+    margin: 48px auto 0;
+    padding: 28px 24px;
+  }
+  .center-card h1 { font-size: 1.4rem; margin: 0 0 6px; }
+  .center-card .lede { color: var(--muted); font-size: .93rem; margin: 0 0 20px; }
+  .center-card .fineprint { color: var(--muted); font-size: .8rem; margin-top: 16px; }
+  .center-card form { margin: 0; }
+  .center-card button[type="submit"] { width: 100%; margin-top: 4px; }
+
+  .notice {
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: .9rem;
+    margin-bottom: 16px;
+  }
+  .notice.err  { background: var(--danger-soft); color: var(--danger); border: 1px solid #fecaca; }
+  .notice.good { background: #ecfdf5; color: var(--ok); border: 1px solid #a7f3d0; }
 
   /* Summary cards */
   .summary {
@@ -53,6 +84,13 @@
 
   .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0 14px; }
   .toolbar .count { color: var(--muted); font-size: .9rem; }
+  .toolbar .left-side { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+  /* Save status pill */
+  .status { font-size: .8rem; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
+  .status.busy { background: var(--accent-soft); color: var(--accent); }
+  .status.ok   { background: #ecfdf5; color: var(--ok); }
+  .status.err  { background: var(--danger-soft); color: var(--danger); }
 
   button {
     font: inherit;
@@ -66,6 +104,8 @@
   button.ghost { background: transparent; border-color: var(--line); color: var(--ink); }
   button.ghost:hover { background: #f0f2f7; }
   button.small { padding: 6px 10px; font-size: .85rem; }
+  button.link { background: none; border: none; color: var(--accent); padding: 0; text-decoration: underline; font-size: .82rem; }
+  button:disabled { opacity: .55; cursor: not-allowed; }
 
   /* Subscription list */
   .list { display: flex; flex-direction: column; gap: 12px; }
@@ -101,6 +141,7 @@
   .badge.rating { background: var(--accent-soft); color: var(--accent); }
   .badge.rating.cancel { background: #fee2e2; color: var(--danger); }
   .badge.soon { background: var(--warn-soft); color: var(--warn); border-color: #fed7aa; }
+  .badge.past { background: #f3f4f6; color: var(--muted); border-color: var(--line); }
 
   .row-actions { display: flex; gap: 8px; }
 
@@ -131,6 +172,7 @@
     box-shadow: 0 20px 40px rgba(16,24,40,.25);
   }
   .modal h2 { margin: 0 0 14px; font-size: 1.2rem; }
+  .modal p { font-size: .92rem; color: var(--muted); }
   .field { margin-bottom: 12px; }
   .field label { display: block; font-size: .85rem; font-weight: 600; margin-bottom: 4px; }
   .field input, .field select {
@@ -154,15 +196,59 @@
     .card .right { text-align: left; align-items: flex-start; width: 100%; }
     .row-actions { width: 100%; }
     .row-actions button { flex: 1; }
+    header.app { flex-direction: column; }
+    header.app .who { text-align: left; }
   }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header class="app">
+
+<!-- ===================== Booting ===================== -->
+<div class="wrap" id="bootView">
+  <div class="center-card">
     <h1>Subscription Tracker</h1>
-    <p>Track your recurring subscriptions. Everything is saved in this browser on this device.</p>
+    <p class="lede">Loading&hellip;</p>
+  </div>
+</div>
+
+<!-- ===================== Sign in ===================== -->
+<div class="wrap hidden" id="authView">
+  <div class="center-card">
+    <h1>Subscription Tracker</h1>
+    <p class="lede">Enter your email and we'll send you a sign-in link. No password to remember.</p>
+
+    <div class="notice err hidden" id="authError"></div>
+    <div class="notice good hidden" id="authSent"></div>
+
+    <form id="authForm" novalidate>
+      <div class="field" id="f-email">
+        <label for="email">Email address</label>
+        <input type="email" id="email" autocomplete="email" placeholder="you@example.com" inputmode="email">
+        <div class="error">Please enter a valid email address.</div>
+      </div>
+      <button type="submit" class="primary" id="sendLinkBtn">Send me a sign-in link</button>
+    </form>
+
+    <p class="fineprint">
+      First time here? Entering your email creates your account automatically.
+    </p>
+  </div>
+</div>
+
+<!-- ===================== The app ===================== -->
+<div class="wrap hidden" id="appView">
+  <header class="app">
+    <div>
+      <h1>Subscription Tracker</h1>
+      <p>Track your recurring subscriptions. Saved to your account.</p>
+    </div>
+    <div class="who">
+      <span class="email" id="userEmail"></span>
+      <button class="ghost small" id="signOutBtn">Sign out</button>
+    </div>
   </header>
+
+  <div class="notice err hidden" id="appError"></div>
 
   <section class="summary" aria-label="Cost summary">
     <div class="box">
@@ -178,14 +264,17 @@
   </section>
 
   <div class="toolbar">
-    <span class="count" id="count">0 subscriptions</span>
+    <div class="left-side">
+      <span class="count" id="count">0 subscriptions</span>
+      <span class="status hidden" id="status"></span>
+    </div>
     <button class="primary" id="addBtn">+ Add subscription</button>
   </div>
 
   <div class="list" id="list"></div>
 </div>
 
-<!-- Add / Edit modal -->
+<!-- ===================== Add / edit modal ===================== -->
 <div class="backdrop" id="backdrop">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <h2 id="modalTitle">Add subscription</h2>
@@ -198,8 +287,8 @@
       </div>
       <div class="field" id="f-cost">
         <label for="cost">Cost (USD)</label>
-        <input type="number" id="cost" step="0.01" min="0" placeholder="e.g. 9.99">
-        <div class="error">Please enter a cost of 0 or more.</div>
+        <input type="number" id="cost" step="0.01" min="0" max="99999999.99" placeholder="e.g. 9.99">
+        <div class="error">Please enter a cost between 0 and 99,999,999.99.</div>
       </div>
       <div class="field" id="f-freq">
         <label for="frequency">Billing frequency</label>
@@ -230,258 +319,670 @@
   </div>
 </div>
 
+<!-- ===================== Import-from-browser modal ===================== -->
+<div class="backdrop" id="importBackdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="importTitle">
+    <h2 id="importTitle">Import your existing subscriptions?</h2>
+    <p id="importBody"></p>
+    <div class="actions">
+      <button type="button" class="ghost" id="importSkipBtn">No thanks</button>
+      <button type="button" class="primary" id="importDoBtn">Import them</button>
+    </div>
+  </div>
+</div>
+
 <script>
-(function () {
-  "use strict";
-
-  var STORAGE_KEY = "subscription-tracker.v1";
-
-  // ---- Sample (fictional) data, used only on first run ----
-  function sampleData() {
-    var today = new Date();
-    function inDays(n) {
-      var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + n);
-      return d.toISOString().slice(0, 10);
+  // If the module below never loads (offline, CDN blocked, proxy), the page
+  // would otherwise sit on "Loading…" forever with no explanation. The module
+  // cancels this timer once it starts.
+  window.__bootTimer = setTimeout(function () {
+    var b = document.getElementById("bootView");
+    if (b && !b.classList.contains("hidden")) {
+      b.querySelector(".lede").textContent =
+        "Couldn't load the app's code from the network. Check your connection and reload the page.";
     }
-    return [
-      { id: uid(), name: "Streamly",        cost: 15.99, frequency: "monthly", renewal: inDays(6),  rating: "Love it" },
-      { id: uid(), name: "CloudVault Pro",  cost: 99.00, frequency: "yearly",  renewal: inDays(40), rating: "Like it" },
-      { id: uid(), name: "FitTrack+",       cost: 29.99, frequency: "monthly", renewal: inDays(11), rating: "Cancel soon" },
-      { id: uid(), name: "NewsWire Daily",  cost: 6.50,  frequency: "monthly", renewal: inDays(21), rating: "Meh" },
-      { id: uid(), name: "PixelEdit Studio",cost: 120.00,frequency: "yearly",  renewal: inDays(3),  rating: "Like it" }
-    ];
-  }
+  }, 10000);
+</script>
 
-  // ---- State + storage ----
-  var subs = [];
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-  function uid() {
-    return "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
-  }
+// Capture any error the sign-in link came back with BEFORE createClient runs,
+// because the library consumes and clears the URL. Without this, an expired
+// link just silently redisplays the sign-in form.
+const linkParams = new URLSearchParams(
+  (window.location.hash.replace(/^#/, "") || "") + "&" + (window.location.search.replace(/^\?/, "") || "")
+);
+let linkError = linkParams.get("error_description") || linkParams.get("error") || null;
+if (linkError) linkError = linkError.replace(/\+/g, " ");
 
-  function load() {
-    var raw = null;
-    try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { raw = null; }
-    if (raw === null) {
-      subs = sampleData();
-      save();
-      return;
-    }
-    try {
-      var parsed = JSON.parse(raw);
-      subs = Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-      subs = [];
-    }
-  }
+// ============================================================================
+// CONFIGURATION
+//
+// Both of these values are PUBLIC by design. They are safe to commit to a
+// public repo and safe to ship in the browser. They identify the project; they
+// do not grant access. Row Level Security in the database is the actual lock.
+//
+// The one key that must never appear here is the "secret" / service_role key.
+// ============================================================================
+const SUPABASE_URL = "https://rjmgqrnkuooqqitwbbrz.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_sq59_BWVLY83urx6bAGZ4Q_WrUKpiZ3";
 
-  function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(subs)); } catch (e) { /* ignore */ }
-  }
+const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
-  // ---- Helpers ----
-  function money(n) {
-    return "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
+// Old browser-only storage, kept solely so we can offer to import it once.
+const LEGACY_KEY = "subscription-tracker.v1";
+const IMPORT_DONE_KEY = "subscription-tracker.imported";
 
-  function monthlyEquivalent(sub) {
-    return sub.frequency === "yearly" ? sub.cost / 12 : sub.cost;
-  }
+// ---------------------------------------------------------------------------
+// Element lookups
+// ---------------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
 
-  function daysUntil(dateStr) {
-    var parts = dateStr.split("-");
-    var target = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-    var now = new Date();
-    var todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    var ms = target - todayMid;
-    return Math.round(ms / 86400000);
-  }
+const bootView = $("bootView");
+const authView = $("authView");
+const appView  = $("appView");
 
-  function formatDate(dateStr) {
-    var parts = dateStr.split("-");
-    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  }
+const authForm    = $("authForm");
+const emailEl     = $("email");
+const sendLinkBtn = $("sendLinkBtn");
+const authError   = $("authError");
+const authSent    = $("authSent");
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-    });
-  }
+const userEmailEl = $("userEmail");
+const signOutBtn  = $("signOutBtn");
+const appError    = $("appError");
+const statusEl    = $("status");
 
-  // ---- Rendering ----
-  var listEl = document.getElementById("list");
-  var totalMonthlyEl = document.getElementById("totalMonthly");
-  var totalYearlyEl = document.getElementById("totalYearly");
-  var countEl = document.getElementById("count");
+const listEl         = $("list");
+const totalMonthlyEl = $("totalMonthly");
+const totalYearlyEl  = $("totalYearly");
+const countEl        = $("count");
 
-  function render() {
-    // Totals
-    var monthlyTotal = subs.reduce(function (acc, s) { return acc + monthlyEquivalent(s); }, 0);
-    totalMonthlyEl.textContent = money(monthlyTotal);
-    totalYearlyEl.textContent = money(monthlyTotal * 12);
+const backdrop   = $("backdrop");
+const form       = $("subForm");
+const modalTitle = $("modalTitle");
+const editIdField= $("editId");
+const nameEl     = $("name");
+const costEl     = $("cost");
+const freqEl     = $("frequency");
+const renewalEl  = $("renewal");
+const ratingEl   = $("rating");
+const saveBtn    = $("saveBtn");
+const addBtn     = $("addBtn");
 
-    countEl.textContent = subs.length + (subs.length === 1 ? " subscription" : " subscriptions");
+const importBackdrop = $("importBackdrop");
+const importBody     = $("importBody");
+const importDoBtn    = $("importDoBtn");
+const importSkipBtn  = $("importSkipBtn");
 
-    // List, sorted by highest monthly-equivalent cost first
-    var sorted = subs.slice().sort(function (a, b) {
-      return monthlyEquivalent(b) - monthlyEquivalent(a);
-    });
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let subs = [];          // rows straight from the database
+let householdId = null; // which household we read and write
+let currentUser = null;
 
-    if (sorted.length === 0) {
-      listEl.innerHTML = '<div class="empty">No subscriptions yet. Click &ldquo;Add subscription&rdquo; to get started.</div>';
-      return;
-    }
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+function show(el) { el.classList.remove("hidden"); }
+function hide(el) { el.classList.add("hidden"); }
 
-    listEl.innerHTML = "";
-    sorted.forEach(function (s) {
-      var days = daysUntil(s.renewal);
-      var soon = days >= 0 && days <= 14;
-      var isCancel = s.rating === "Cancel soon";
+function showOnly(view) {
+  [bootView, authView, appView].forEach((v) => (v === view ? show(v) : hide(v)));
+}
 
-      var card = document.createElement("div");
-      card.className = "card" + (isCancel ? " cancel" : "");
+function money(n) {
+  return "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
-      var perLabel = s.frequency === "yearly" ? "/year" : "/month";
+function monthlyEquivalent(sub) {
+  return sub.billing_period === "yearly" ? Number(sub.cost) / 12 : Number(sub.cost);
+}
 
-      var soonBadge = soon
-        ? '<span class="badge soon">Renews in ' + days + (days === 1 ? " day" : " days") + '</span>'
-        : "";
-      var ratingBadge = '<span class="badge rating' + (isCancel ? " cancel" : "") + '">' + escapeHtml(s.rating) + '</span>';
+function daysUntil(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const target = new Date(y, m - 1, d);
+  const now = new Date();
+  const todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((target - todayMid) / 86400000);
+}
 
-      card.innerHTML =
-        '<div class="left">' +
-          '<div class="name">' + escapeHtml(s.name) + '</div>' +
-          '<div class="meta">Renews ' + formatDate(s.renewal) + '</div>' +
-          '<div class="badges">' + ratingBadge + soonBadge + '</div>' +
-        '</div>' +
-        '<div class="right">' +
-          '<div class="cost">' + money(s.cost) + '<span class="per"> ' + perLabel + '</span></div>' +
-          '<div class="row-actions">' +
-            '<button class="ghost small" data-edit="' + s.id + '">Edit</button>' +
-            '<button class="ghost small" data-delete="' + s.id + '">Delete</button>' +
-          '</div>' +
-        '</div>';
+function formatDate(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
 
-      listEl.appendChild(card);
-    });
-  }
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
 
-  // ---- Modal + form ----
-  var backdrop = document.getElementById("backdrop");
-  var form = document.getElementById("subForm");
-  var modalTitle = document.getElementById("modalTitle");
-  var editIdField = document.getElementById("editId");
-  var nameEl = document.getElementById("name");
-  var costEl = document.getElementById("cost");
-  var freqEl = document.getElementById("frequency");
-  var renewalEl = document.getElementById("renewal");
-  var ratingEl = document.getElementById("rating");
+// The save-status pill. Writes can now fail in ways localStorage never did,
+// so the app should always be visibly honest about what it managed to save.
+let statusTimer = null;
+function setStatus(kind, text) {
+  clearTimeout(statusTimer);
+  if (!kind) { hide(statusEl); return; }
+  statusEl.className = "status " + kind;
+  statusEl.textContent = text;
+  show(statusEl);
+  if (kind === "ok") statusTimer = setTimeout(() => hide(statusEl), 2000);
+}
 
-  function openModal(sub) {
-    clearErrors();
-    if (sub) {
-      modalTitle.textContent = "Edit subscription";
-      editIdField.value = sub.id;
-      nameEl.value = sub.name;
-      costEl.value = sub.cost;
-      freqEl.value = sub.frequency;
-      renewalEl.value = sub.renewal;
-      ratingEl.value = sub.rating;
-    } else {
-      modalTitle.textContent = "Add subscription";
-      editIdField.value = "";
-      form.reset();
-      freqEl.value = "monthly";
-      ratingEl.value = "Love it";
-    }
-    backdrop.classList.add("open");
-    nameEl.focus();
-  }
+function showAppError(message) {
+  appError.textContent = message;
+  show(appError);
+}
+function clearAppError() {
+  hide(appError);
+}
 
-  function closeModal() {
-    backdrop.classList.remove("open");
-  }
+// ---------------------------------------------------------------------------
+// AUTHENTICATION
+//
+// Magic link: the user types an email, Supabase mails them a link, clicking it
+// returns them here with a session in the URL. The client library picks that up
+// automatically and tidies the URL.
+//
+// emailRedirectTo is window.location.origin rather than a hardcoded address, so
+// the same file works on localhost and on Vercel with nothing to remember to
+// change before deploying.
+// ---------------------------------------------------------------------------
+authForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  hide(authError);
+  hide(authSent);
 
-  function clearErrors() {
-    ["f-name", "f-cost", "f-date"].forEach(function (id) {
-      document.getElementById(id).classList.remove("invalid");
-    });
-  }
+  const email = emailEl.value.trim();
+  const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  $("f-email").classList.toggle("invalid", !looksLikeEmail);
+  if (!looksLikeEmail) return;
 
-  function validate() {
-    clearErrors();
-    var ok = true;
-    if (nameEl.value.trim() === "") {
-      document.getElementById("f-name").classList.add("invalid"); ok = false;
-    }
-    var costVal = parseFloat(costEl.value);
-    if (isNaN(costVal) || costVal < 0) {
-      document.getElementById("f-cost").classList.add("invalid"); ok = false;
-    }
-    if (renewalEl.value === "") {
-      document.getElementById("f-date").classList.add("invalid"); ok = false;
-    }
-    return ok;
-  }
+  sendLinkBtn.disabled = true;
+  sendLinkBtn.textContent = "Sending…";
 
-  form.addEventListener("submit", function (e) {
-    e.preventDefault();
-    if (!validate()) return;
-
-    var record = {
-      name: nameEl.value.trim(),
-      cost: Math.round(parseFloat(costEl.value) * 100) / 100,
-      frequency: freqEl.value,
-      renewal: renewalEl.value,
-      rating: ratingEl.value
-    };
-
-    var id = editIdField.value;
-    if (id) {
-      subs = subs.map(function (s) {
-        return s.id === id ? { id: id, name: record.name, cost: record.cost, frequency: record.frequency, renewal: record.renewal, rating: record.rating } : s;
-      });
-    } else {
-      record.id = uid();
-      subs.push(record);
-    }
-    save();
-    render();
-    closeModal();
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: window.location.origin }
   });
 
-  // ---- Events ----
-  document.getElementById("addBtn").addEventListener("click", function () { openModal(null); });
-  document.getElementById("cancelBtn").addEventListener("click", closeModal);
-  backdrop.addEventListener("click", function (e) {
-    if (e.target === backdrop) closeModal();
-  });
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && backdrop.classList.contains("open")) closeModal();
-  });
+  sendLinkBtn.disabled = false;
+  sendLinkBtn.textContent = "Send me a sign-in link";
 
-  listEl.addEventListener("click", function (e) {
-    var editId = e.target.getAttribute("data-edit");
-    var deleteId = e.target.getAttribute("data-delete");
-    if (editId) {
-      var sub = subs.find(function (s) { return s.id === editId; });
-      if (sub) openModal(sub);
-    } else if (deleteId) {
-      var target = subs.find(function (s) { return s.id === deleteId; });
-      var label = target ? target.name : "this subscription";
-      if (window.confirm('Delete "' + label + '"?')) {
-        subs = subs.filter(function (s) { return s.id !== deleteId; });
-        save();
-        render();
-      }
+  if (error) {
+    // The most likely failure by far is the built-in mailer's hourly rate
+    // limit, so name it rather than dumping a raw error at the user.
+    const rateLimited = /rate limit|too many/i.test(error.message || "");
+    authError.textContent = rateLimited
+      ? "Too many emails requested in a short time. Wait a few minutes and try again."
+      : "Couldn't send the link: " + error.message;
+    show(authError);
+    return;
+  }
+
+  authSent.textContent = "Check " + email + " for your sign-in link. It may take a minute to arrive.";
+  show(authSent);
+  authForm.reset();
+});
+
+signOutBtn.addEventListener("click", async () => {
+  await supabase.auth.signOut();
+  // onAuthStateChange handles the rest.
+});
+
+// Single source of truth for "who is signed in". Fires on page load once the
+// session is restored or read out of the URL, and again on sign-in/sign-out.
+//
+// Note the setTimeout. The client library holds an internal lock while this
+// callback runs, so calling other supabase methods directly from inside it can
+// deadlock and the app hangs on the loading screen. Deferring by 0ms lets the
+// lock release first. This is a genuine footgun, not superstition.
+supabase.auth.onAuthStateChange((event, session) => {
+  const user = session?.user ?? null;
+
+  if (!user) {
+    currentUser = null;
+    householdId = null;
+    subs = [];
+    hide(authSent);
+    hide(authError);
+    // Surface an expired or already-used sign-in link instead of silently
+    // showing the form again, which looks like the click did nothing.
+    if (linkError) {
+      authError.textContent =
+        "That sign-in link didn't work (" + linkError + "). Request a fresh one below.";
+      show(authError);
+      linkError = null;
     }
-  });
+    showOnly(authView);
+    return;
+  }
 
-  // ---- Start ----
-  load();
+  // Ignore repeat events for the same user (token refreshes fire this too).
+  if (currentUser && currentUser.id === user.id) return;
+
+  currentUser = user;
+  userEmailEl.textContent = user.email ?? "";
+  showOnly(appView);
+  setTimeout(() => { startSession(); }, 0);
+});
+
+// ---------------------------------------------------------------------------
+// DATA LAYER
+//
+// Deliberately simple: every change writes to the database and then re-reads
+// the list. Slightly more network traffic, but the screen can never drift out
+// of sync with what's actually stored, which is the bug class I'd rather not
+// have in a first version. The lists here are tiny.
+// ---------------------------------------------------------------------------
+
+async function startSession() {
+  clearAppError();
+  setStatus("busy", "Loading…");
+
+  // Nothing can be added until we know which household to add it to.
+  addBtn.disabled = true;
+
+  // If the user signs out while this function is mid-flight, every step after
+  // an await would otherwise keep running against the old session and could
+  // even pop the import dialog over the sign-in screen.
+  const forUser = currentUser;
+  const stale = () => currentUser !== forUser;
+
+  const { data, error } = await supabase
+    .from("household_members")
+    .select("household_id")
+    .order("created_at", { ascending: true })  // deterministic once sharing exists
+    .limit(1);
+
+  if (stale()) return;
+
+  if (error) {
+    setStatus(null);
+    showAppError("Couldn't reach your data: " + error.message);
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    // Almost always means schema.sql hasn't been run, so the signup trigger
+    // that creates a household doesn't exist yet.
+    setStatus(null);
+    showAppError(
+      "Your account has no subscription list yet. This usually means schema.sql " +
+      "hasn't been run in the Supabase SQL Editor. Run it, then sign out and back in."
+    );
+    return;
+  }
+
+  householdId = data[0].household_id;
+
+  const loaded = await loadSubs();
+  if (stale() || !loaded) return;
+
+  addBtn.disabled = false;
+  setStatus(null);
+  maybeOfferImport();
+}
+
+async function loadSubs() {
+  const { data, error } = await supabase
+    .from("subscriptions")
+    .select("id, name, cost, currency, billing_period, next_renewal, rating, notes")
+    .eq("household_id", householdId)
+    .eq("is_active", true)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    setStatus("err", "Couldn't load");
+    showAppError("Couldn't load your subscriptions: " + error.message);
+    return false;
+  }
+
+  subs = data ?? [];
+  clearAppError();
   render();
-})();
+  return true;
+}
+
+// Wraps a write: show progress, report failure plainly, always re-read after.
+//
+// Every write asks for the affected rows back. A row the security rules hide
+// from you isn't an error, it's just zero rows changed, and without this check
+// the app would cheerfully report "Saved" for a write that did nothing.
+async function withSave(label, fn) {
+  if (!householdId) {
+    showAppError("Not connected to your subscription list yet. Reload the page.");
+    return false;
+  }
+  setStatus("busy", label);
+  const { data, error } = await fn();
+  if (error) {
+    setStatus("err", "Not saved");
+    showAppError("That change wasn't saved: " + error.message);
+    await loadSubs();  // fall back to the truth
+    return false;
+  }
+  if (!data || data.length === 0) {
+    setStatus("err", "Not saved");
+    showAppError("That change didn't apply. Reload the page and try again.");
+    await loadSubs();
+    return false;
+  }
+  const ok = await loadSubs();
+  if (ok) setStatus("ok", "Saved");
+  return ok;
+}
+
+function insertSub(record) {
+  return withSave("Saving…", () =>
+    supabase.from("subscriptions")
+      .insert({ ...record, household_id: householdId })
+      .select("id")
+  );
+}
+
+function updateSub(id, record) {
+  return withSave("Saving…", () =>
+    supabase.from("subscriptions").update(record).eq("id", id).select("id")
+  );
+}
+
+function deleteSub(id) {
+  return withSave("Deleting…", () =>
+    supabase.from("subscriptions").delete().eq("id", id).select("id")
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ONE-TIME IMPORT of data left in this browser by the old version
+// ---------------------------------------------------------------------------
+const MAX_COST = 99999999.99;   // the limit of numeric(10,2) in the database
+const RATINGS = ["Love it", "Like it", "Meh", "Cancel soon"];
+
+// Turn one old browser record into a valid database row, or null if it can't
+// be salvaged. The old version never validated what it stored, so this has to
+// assume nothing: a single bad row would otherwise reject the entire import.
+function legacyToRow(s) {
+  if (!s || typeof s !== "object") return null;
+
+  const name = String(s.name ?? "").trim().slice(0, 60);
+  if (name === "") return null;
+
+  const renewal = String(s.next_renewal ?? s.renewal ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(renewal)) return null;
+  if (!Number.isFinite(Date.parse(renewal))) return null;
+
+  let cost = Number(s.cost);
+  if (!Number.isFinite(cost) || cost < 0) cost = 0;
+  cost = Math.min(Math.round(cost * 100) / 100, MAX_COST);
+
+  return {
+    name,
+    cost,
+    billing_period: (s.billing_period ?? s.frequency) === "yearly" ? "yearly" : "monthly",
+    next_renewal: renewal,
+    rating: RATINGS.includes(s.rating) ? s.rating : "Like it"
+  };
+}
+
+function readLegacyData() {
+  let raw = null;
+  try { raw = localStorage.getItem(LEGACY_KEY); } catch { return []; }
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(legacyToRow).filter(Boolean);
+  } catch { return []; }
+}
+
+function alreadyOfferedImport() {
+  try { return localStorage.getItem(IMPORT_DONE_KEY) === "yes"; } catch { return true; }
+}
+function markImportHandled() {
+  try { localStorage.setItem(IMPORT_DONE_KEY, "yes"); } catch { /* ignore */ }
+}
+
+let pendingImport = [];
+
+function maybeOfferImport() {
+  // Only when this browser has old data AND the account is empty AND we
+  // haven't asked before. Prevents duplicates and avoids surprising anyone
+  // signing in on a shared machine with stale test data.
+  if (alreadyOfferedImport()) return;
+  if (subs.length > 0) return;
+
+  pendingImport = readLegacyData();
+  if (pendingImport.length === 0) return;
+
+  const n = pendingImport.length;
+  importBody.textContent =
+    "This browser has " + n + (n === 1 ? " subscription" : " subscriptions") +
+    " saved from before you had an account. Copy them into your account now? " +
+    "Your browser copy is kept either way, so nothing can be lost here.";
+  importBackdrop.classList.add("open");
+}
+
+function closeImport() {
+  importBackdrop.classList.remove("open");
+}
+
+importSkipBtn.addEventListener("click", () => {
+  markImportHandled();
+  closeImport();
+});
+
+importDoBtn.addEventListener("click", async () => {
+  importDoBtn.disabled = true;
+  importSkipBtn.disabled = true;
+
+  // pendingImport rows are already validated and shaped by legacyToRow().
+  const rows = pendingImport.map((r) => ({ ...r, household_id: householdId }));
+
+  setStatus("busy", "Importing…");
+  const { error } = await supabase.from("subscriptions").insert(rows);
+
+  importDoBtn.disabled = false;
+  importSkipBtn.disabled = false;
+  closeImport();
+
+  if (error) {
+    setStatus("err", "Import failed");
+    showAppError("Import didn't work: " + error.message + " Your browser copy is untouched, so nothing was lost.");
+    return;
+  }
+
+  markImportHandled();
+  await loadSubs();
+  setStatus("ok", "Imported");
+});
+
+// ---------------------------------------------------------------------------
+// RENDERING
+// ---------------------------------------------------------------------------
+function render() {
+  const monthlyTotal = subs.reduce((acc, s) => acc + monthlyEquivalent(s), 0);
+  totalMonthlyEl.textContent = money(monthlyTotal);
+  totalYearlyEl.textContent = money(monthlyTotal * 12);
+
+  countEl.textContent = subs.length + (subs.length === 1 ? " subscription" : " subscriptions");
+
+  // Most expensive per month first.
+  const sorted = subs.slice().sort((a, b) => monthlyEquivalent(b) - monthlyEquivalent(a));
+
+  if (sorted.length === 0) {
+    listEl.innerHTML = '<div class="empty">No subscriptions yet. Click &ldquo;Add subscription&rdquo; to get started.</div>';
+    return;
+  }
+
+  listEl.innerHTML = "";
+  sorted.forEach((s) => {
+    const days = daysUntil(s.next_renewal);
+    const soon = days >= 0 && days <= 14;
+    const past = days < 0;
+    const isCancel = s.rating === "Cancel soon";
+
+    const card = document.createElement("div");
+    card.className = "card" + (isCancel ? " cancel" : "");
+
+    const perLabel = s.billing_period === "yearly" ? "/year" : "/month";
+
+    let timingBadge = "";
+    if (days === 0) {
+      timingBadge = '<span class="badge soon">Renews today</span>';
+    } else if (soon) {
+      timingBadge = '<span class="badge soon">Renews in ' + days + (days === 1 ? " day" : " days") + "</span>";
+    } else if (past) {
+      timingBadge = '<span class="badge past">Renewal date has passed</span>';
+    }
+
+    const ratingBadge =
+      '<span class="badge rating' + (isCancel ? " cancel" : "") + '">' + escapeHtml(s.rating) + "</span>";
+
+    card.innerHTML =
+      '<div class="left">' +
+        '<div class="name">' + escapeHtml(s.name) + "</div>" +
+        '<div class="meta">Renews ' + formatDate(s.next_renewal) + "</div>" +
+        '<div class="badges">' + ratingBadge + timingBadge + "</div>" +
+      "</div>" +
+      '<div class="right">' +
+        '<div class="cost">' + money(s.cost) + '<span class="per"> ' + perLabel + "</span></div>" +
+        '<div class="row-actions">' +
+          '<button class="ghost small" data-edit="' + s.id + '">Edit</button>' +
+          '<button class="ghost small" data-delete="' + s.id + '">Delete</button>' +
+        "</div>" +
+      "</div>";
+
+    listEl.appendChild(card);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// ADD / EDIT MODAL
+// ---------------------------------------------------------------------------
+function openModal(sub) {
+  clearErrors();
+  if (sub) {
+    modalTitle.textContent = "Edit subscription";
+    editIdField.value = sub.id;
+    nameEl.value = sub.name;
+    costEl.value = sub.cost;
+    freqEl.value = sub.billing_period;
+    renewalEl.value = sub.next_renewal;
+    ratingEl.value = sub.rating;
+  } else {
+    modalTitle.textContent = "Add subscription";
+    form.reset();
+    editIdField.value = "";
+    freqEl.value = "monthly";
+    ratingEl.value = "Love it";
+  }
+  backdrop.classList.add("open");
+  nameEl.focus();
+}
+
+function closeModal() {
+  backdrop.classList.remove("open");
+}
+
+function clearErrors() {
+  ["f-name", "f-cost", "f-date"].forEach((id) => $(id).classList.remove("invalid"));
+}
+
+function validate() {
+  clearErrors();
+  let ok = true;
+  if (nameEl.value.trim() === "") {
+    $("f-name").classList.add("invalid"); ok = false;
+  }
+  // Number.isFinite rather than !isNaN: a number input accepts "1e999", which
+  // parses to Infinity, passes an isNaN check, and then lands in the database
+  // as null, violating a not-null constraint. MAX_COST is the ceiling of
+  // numeric(10,2), so a typo like an extra three zeros is caught here rather
+  // than coming back as a raw "numeric field overflow".
+  const costVal = parseFloat(costEl.value);
+  if (!Number.isFinite(costVal) || costVal < 0 || costVal > MAX_COST) {
+    $("f-cost").classList.add("invalid"); ok = false;
+  }
+  if (renewalEl.value === "") {
+    $("f-date").classList.add("invalid"); ok = false;
+  }
+  return ok;
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!validate()) return;
+
+  const record = {
+    name: nameEl.value.trim(),
+    cost: Math.round(parseFloat(costEl.value) * 100) / 100,
+    billing_period: freqEl.value,
+    next_renewal: renewalEl.value,
+    rating: ratingEl.value
+  };
+
+  const id = editIdField.value;
+  saveBtn.disabled = true;
+  closeModal();
+  if (id) {
+    await updateSub(id, record);
+  } else {
+    await insertSub(record);
+  }
+  saveBtn.disabled = false;
+});
+
+// ---------------------------------------------------------------------------
+// EVENTS
+// ---------------------------------------------------------------------------
+addBtn.addEventListener("click", () => openModal(null));
+$("cancelBtn").addEventListener("click", closeModal);
+
+backdrop.addEventListener("click", (e) => {
+  if (e.target === backdrop) closeModal();
+});
+
+// Dismissing the import dialog counts as declining, so it isn't re-offered.
+importBackdrop.addEventListener("click", (e) => {
+  if (e.target === importBackdrop) { markImportHandled(); closeImport(); }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (backdrop.classList.contains("open")) closeModal();
+  else if (importBackdrop.classList.contains("open")) { markImportHandled(); closeImport(); }
+});
+
+listEl.addEventListener("click", async (e) => {
+  const editId = e.target.getAttribute("data-edit");
+  const deleteId = e.target.getAttribute("data-delete");
+
+  if (editId) {
+    const sub = subs.find((s) => s.id === editId);
+    if (sub) openModal(sub);
+  } else if (deleteId) {
+    const target = subs.find((s) => s.id === deleteId);
+    const label = target ? target.name : "this subscription";
+    if (window.confirm('Delete "' + label + '"?')) {
+      await deleteSub(deleteId);
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// START
+//
+// getSession settles whether we're signed in. onAuthStateChange above does the
+// actual view switching; this call just guarantees it fires and that we don't
+// sit on the loading screen forever if nobody is signed in.
+// ---------------------------------------------------------------------------
+clearTimeout(window.__bootTimer);   // the module loaded, so cancel the fallback message
+
+const { data: { session } } = await supabase.auth.getSession();
+if (!session) showOnly(authView);
 </script>
 </body>
 </html>
