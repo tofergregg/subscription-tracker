@@ -131,6 +131,9 @@
     gap: 12px;
   }
   .card.cancel { border-left-color: var(--danger); background: var(--danger-soft); }
+  /* Module 3. A cancelled subscription stays in the list, visibly retired
+     rather than deleted, because the history is the point. */
+  .card.cancelled { opacity: .62; border-left-color: var(--muted); background: #fafbfc; }
   .card .name { font-weight: 650; font-size: 1.05rem; }
   .card .meta { color: var(--muted); font-size: .9rem; margin-top: 3px; }
   .card .cost { font-weight: 700; white-space: nowrap; }
@@ -153,6 +156,7 @@
   .badge.past { background: #f3f4f6; color: var(--muted); border-color: var(--line); }
   .badge.cat { background: #eef1f6; color: #414c63; border-color: #dfe4ec; }
   .badge.manual { background: #fffbeb; color: var(--warn); border-color: #fde68a; }
+  .badge.cancelled { background: #f3f4f6; color: var(--muted); border-color: var(--line); }
 
   .row-actions { display: flex; gap: 8px; }
 
@@ -341,6 +345,20 @@
           <option value="Meh">Meh</option>
           <option value="Cancel soon">Cancel soon</option>
         </select>
+        <div class="hint">How you feel about it. Separate from the status below.</div>
+      </div>
+      <!-- Module 3. Status records a FACT: are you still paying for this? The
+           usage rating above records an OPINION. Two badges that look alike
+           and mean different things is how you confuse yourself in six weeks,
+           so the labels say which is which. -->
+      <div class="field" id="f-status">
+        <label for="substatus">Status</label>
+        <select id="substatus">
+          <option value="Active">Active</option>
+          <option value="Cancelled">Cancelled</option>
+        </select>
+        <div class="hint">Cancelled is final. A cancelled subscription stays in your list so you keep the spending history.</div>
+        <div class="error">Cancelled is final. Add a new subscription instead, because signing up again usually means a different price and a different renewal date.</div>
       </div>
       <div class="actions">
         <button type="button" class="ghost" id="cancelBtn">Cancel</button>
@@ -444,6 +462,7 @@ const renewalEl  = $("renewal");
 const categoryEl = $("category");
 const autoRenewEl= $("autorenew");
 const ratingEl   = $("rating");
+const subStatusEl= $("substatus");   // Module 3
 const saveBtn    = $("saveBtn");
 const addBtn     = $("addBtn");
 
@@ -735,7 +754,7 @@ function fillCategoryControls() {
 async function loadSubs() {
   const { data, error } = await supabase
     .from("subscriptions")
-    .select("id, name, cost, currency, billing_period, next_renewal, rating, notes, category_id, auto_renew")
+    .select("id, name, cost, currency, billing_period, next_renewal, rating, notes, category_id, auto_renew, status")
     .eq("household_id", householdId)
     .eq("is_active", true)
     .order("created_at", { ascending: true });
@@ -964,8 +983,15 @@ function render() {
     const past = days < 0;
     const isCancel = s.rating === "Cancel soon";
 
+    // Module 3. Two different ideas that both use the word "cancel", which is
+    // exactly why they are named apart here. isCancel is the RATING, an
+    // opinion. isCancelled is the STATUS, a fact. The status wins the styling,
+    // because once you have actually stopped paying, how you felt about it is
+    // no longer the headline.
+    const isCancelled = s.status === "Cancelled";
+
     const card = document.createElement("div");
-    card.className = "card" + (isCancel ? " cancel" : "");
+    card.className = "card" + (isCancelled ? " cancelled" : (isCancel ? " cancel" : ""));
 
     const perLabel = s.billing_period === "yearly" ? "/year" : "/month";
 
@@ -976,8 +1002,12 @@ function render() {
     const willRenew = s.auto_renew !== false;
     const verb = willRenew ? "Renews" : "Expires";
 
+    // Module 3. A cancelled subscription is not renewing, so a countdown on it
+    // is not merely irrelevant, it is a lie. It disappears entirely.
     let timingBadge = "";
-    if (days === 0) {
+    if (isCancelled) {
+      timingBadge = "";
+    } else if (days === 0) {
       timingBadge = '<span class="badge soon">' + verb + " today</span>";
     } else if (soon) {
       timingBadge = '<span class="badge soon">' + verb + " in " + days + (days === 1 ? " day" : " days") + "</span>";
@@ -993,13 +1023,20 @@ function render() {
       ? '<span class="badge cat">' + escapeHtml(categoryName.get(s.category_id)) + "</span>"
       : "";
 
-    const manualBadge = willRenew ? "" : '<span class="badge manual">Manual renewal</span>';
+    const manualBadge = (isCancelled || willRenew) ? "" :
+      '<span class="badge manual">Manual renewal</span>';
+
+    const statusBadge = isCancelled ? '<span class="badge cancelled">Cancelled</span>' : "";
 
     card.innerHTML =
       '<div class="left">' +
         '<div class="name">' + escapeHtml(s.name) + "</div>" +
-        '<div class="meta">' + (willRenew ? "Renews " : "Expires ") + formatDate(s.next_renewal) + "</div>" +
-        '<div class="badges">' + catBadge + ratingBadge + manualBadge + timingBadge + "</div>" +
+        '<div class="meta">' +
+          (isCancelled
+            ? "Cancelled. Kept for your records."
+            : (willRenew ? "Renews " : "Expires ") + formatDate(s.next_renewal)) +
+        "</div>" +
+        '<div class="badges">' + statusBadge + catBadge + ratingBadge + manualBadge + timingBadge + "</div>" +
       "</div>" +
       '<div class="right">' +
         '<div class="cost">' + money(s.cost) + '<span class="per"> ' + perLabel + "</span></div>" +
@@ -1028,12 +1065,14 @@ function openModal(sub) {
     ratingEl.value = sub.rating;
     categoryEl.value = sub.category_id ?? "";
     autoRenewEl.value = sub.auto_renew === false ? "no" : "yes";
+    subStatusEl.value = sub.status ?? "Active";
   } else {
     modalTitle.textContent = "Add subscription";
     form.reset();
     editIdField.value = "";
     freqEl.value = "monthly";
     ratingEl.value = "Love it";
+    subStatusEl.value = "Active";   // Module 3. Nothing starts life cancelled.
 
     // Module 2. Deliberately left unchosen. You removed the database default
     // on auto_renew, which means "make the app ask every time" rather than
@@ -1058,7 +1097,7 @@ function closeModal() {
 }
 
 function clearErrors() {
-  ["f-name", "f-cost", "f-date", "f-category", "f-autorenew"].forEach((id) =>
+  ["f-name", "f-cost", "f-date", "f-category", "f-autorenew", "f-status"].forEach((id) =>
     $(id).classList.remove("invalid"));
 }
 
@@ -1092,9 +1131,39 @@ function validate() {
   return ok;
 }
 
+// ---------------------------------------------------------------------------
+// Module 3. THE LIFECYCLE RULE
+//
+// Two states, Active and Cancelled, and exactly one move between them:
+// Active -> Cancelled. Cancelled is TERMINAL. Nothing comes back out of it.
+//
+// The reason is not a technicality. If you resubscribe to something, it is
+// almost never the same deal: new price, new renewal date, maybe a new plan.
+// Reactivating the old row would leave your totals quietly built on stale
+// numbers, and the totals are the thing this app exists to get right. So the
+// app makes you add it fresh.
+//
+// This lives here, in the logic layer, rather than in the interface. Hiding or
+// disabling a dropdown option is a suggestion. A rule REFUSES. "Are you sure?"
+// versus "no."
+// ---------------------------------------------------------------------------
+function blockedTransition(existing, nextStatus) {
+  if (!existing) return false;                       // a brand new subscription
+  return existing.status === "Cancelled" && nextStatus !== "Cancelled";
+}
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!validate()) return;
+
+  const id = editIdField.value;
+  const existing = id ? subs.find((s) => s.id === id) : null;
+
+  if (blockedTransition(existing, subStatusEl.value)) {
+    $("f-status").classList.add("invalid");
+    subStatusEl.value = "Cancelled";   // put the truth back on screen
+    return;                            // nothing is written, the modal stays open
+  }
 
   const record = {
     name: nameEl.value.trim(),
@@ -1103,19 +1172,63 @@ form.addEventListener("submit", async (e) => {
     next_renewal: renewalEl.value,
     rating: ratingEl.value,
     category_id: categoryEl.value,
-    auto_renew: autoRenewEl.value === "yes"
+    auto_renew: autoRenewEl.value === "yes",
+    status: subStatusEl.value
   };
 
-  const id = editIdField.value;
   saveBtn.disabled = true;
   closeModal();
+
+  let saved;
   if (id) {
-    await updateSub(id, record);
+    saved = await updateSub(id, record);
   } else {
-    await insertSub(record);
+    saved = await insertSub(record);
   }
   saveBtn.disabled = false;
+
+  // Module 3. The EVENT is the subscription changing state. The TRIGGER is
+  // this: when that event happens, do the next thing automatically. Here the
+  // next thing is an email, and it is sent by an edge function on the server,
+  // never from this page, because the page cannot be trusted with the key.
+  //
+  // Note the two conditions. We only fire when the save actually succeeded,
+  // and only on the Active -> Cancelled move, not on every edit of a row that
+  // was already cancelled. An email that arrives every time you fix a typo is
+  // an email people learn to ignore.
+  const justCancelled =
+    saved && existing &&
+    existing.status !== "Cancelled" &&
+    record.status === "Cancelled";
+
+  if (justCancelled) {
+    notifyCancellation(record);
+  }
 });
+
+// Fire-and-forget on purpose. The subscription is already saved; the email is
+// a courtesy on top. If Resend is having a bad afternoon, the app should not
+// pretend the cancellation failed. We report it quietly and carry on.
+async function notifyCancellation(record) {
+  setStatus("busy", "Emailing you…");
+  const { error } = await supabase.functions.invoke("notify-cancellation", {
+    body: {
+      name: record.name,
+      cost: record.cost,
+      billing_period: record.billing_period,
+    },
+  });
+
+  if (error) {
+    setStatus("err", "Email not sent");
+    showAppError(
+      "The cancellation saved fine, but the confirmation email didn't send: " +
+      error.message + " Check that RESEND_API_KEY is set on the project."
+    );
+    return;
+  }
+  setStatus("ok", "Emailed you");
+}
 
 // ---------------------------------------------------------------------------
 // EVENTS

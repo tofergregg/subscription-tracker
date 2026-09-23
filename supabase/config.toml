@@ -1,0 +1,14 @@
+# Supabase CLI configuration.
+#
+# project_id is which Supabase project `supabase functions deploy` talks to.
+# It is not a secret: it is the same identifier that appears in your project
+# URL. The keys are never stored in this file.
+project_id = "rjmgqrnkuooqqitwbbrz"
+
+# verify_jwt = true means Supabase rejects any call to this function that does
+# not carry a valid signed-in session. It is the default, and it is written out
+# here so the choice is visible rather than implied. Turning it off would let
+# anyone on the internet call your function, and your function is the thing
+# holding the email credential.
+[functions.notify-cancellation]
+verify_jwt = true
