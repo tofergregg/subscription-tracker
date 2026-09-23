@@ -803,7 +803,23 @@ async function loadSubs() {
 
   if (error) {
     setStatus("err", "Couldn't load");
-    showAppError("Couldn't load your subscriptions: " + error.message);
+
+    // Module 3. A missing column means a migration hasn't been run, which is a
+    // setup step rather than a bug, so say which file fixes it. Postgres
+    // reports this as 42703 (undefined_column); the message check is a belt
+    // and braces in case the code isn't passed through.
+    const missingColumn =
+      error.code === "42703" || /column .* does not exist/i.test(error.message ?? "");
+
+    if (missingColumn) {
+      showAppError(
+        "Couldn't load your subscriptions: " + error.message +
+        " This means a migration hasn't been run yet. Open the Supabase SQL " +
+        "Editor and run schema-module3-status.sql, then reload this page."
+      );
+    } else {
+      showAppError("Couldn't load your subscriptions: " + error.message);
+    }
     return false;
   }
 
