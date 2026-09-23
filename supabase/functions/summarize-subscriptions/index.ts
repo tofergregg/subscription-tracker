@@ -19,12 +19,29 @@
 //   If the API returns a model-not-found error, the model name below has been
 //   retired. Set CLAUDE_MODEL to a current model id rather than editing this
 //   file:  supabase secrets set CLAUDE_MODEL=<current-model-id>
+//
+// IF YOUR KEY COMES FROM AN ORGANIZATION RATHER THAN FROM ANTHROPIC
+//   Many universities and companies put a gateway in front of the AI
+//   providers, so that billing, access and audit run through one place. A
+//   gateway speaks its own dialect, usually the OpenAI one, and your key only
+//   works against it and not against Anthropic directly.
+//
+//   Set one extra secret and this function uses that dialect instead:
+//     supabase secrets set AI_GATEWAY_URL=https://your-gateway/v1/chat/completions
+//     supabase secrets set CLAUDE_MODEL=<the model id your gateway lists>
+//
+//   Leave AI_GATEWAY_URL unset and it talks to Anthropic directly, which is
+//   what you want with your own key.
 // ============================================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
-const MODEL = Deno.env.get("CLAUDE_MODEL") ?? "claude-sonnet-4-5";
+const MODEL = Deno.env.get("CLAUDE_MODEL") ?? "claude-haiku-4-5";
+
+// Set only when your key belongs to an organization gateway. See the note at
+// the top of this file.
+const GATEWAY_URL = Deno.env.get("AI_GATEWAY_URL");
 
 // ---------------------------------------------------------------------------
 // THE PROMPT
@@ -145,31 +162,60 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const claude = await fetch("https://api.anthropic.com/v1/messages", {
+    const userMessage = list.length > 0
+      ? `Here is the subscription list:\n\n${list}`
+      : "The subscription list is empty.";
+
+    // A ceiling on length is itself a small guardrail: it is what stops a
+    // summary from quietly becoming an essay.
+    const MAX_TOKENS = 400;
+
+    // Two dialects for the same request. Anthropic takes the system prompt as
+    // its own field and answers with an array of content blocks; the OpenAI
+    // dialect, which is what almost every gateway speaks, takes the system
+    // prompt as the first message and answers with choices. Same conversation,
+    // different envelope.
+    const request = GATEWAY_URL
+      ? {
+        url: GATEWAY_URL,
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: {
+          model: MODEL,
+          stream: false,
+          max_tokens: MAX_TOKENS,
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: userMessage },
+          ],
+        },
+      }
+      : {
+        url: "https://api.anthropic.com/v1/messages",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body: {
+          model: MODEL,
+          max_tokens: MAX_TOKENS,
+          system: SYSTEM_PROMPT,
+          messages: [{ role: "user", content: userMessage }],
+        },
+      };
+
+    const claude = await fetch(request.url, {
       method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        // A ceiling on length is itself a small guardrail: it is what stops a
-        // summary from quietly becoming an essay.
-        max_tokens: 400,
-        system: SYSTEM_PROMPT,
-        messages: [{
-          role: "user",
-          content: list.length > 0
-            ? `Here is the subscription list:\n\n${list}`
-            : "The subscription list is empty.",
-        }],
-      }),
+      headers: request.headers,
+      body: JSON.stringify(request.body),
     });
 
     if (!claude.ok) {
       const detail = await claude.text();
-      console.error("Claude rejected the call:", claude.status, detail);
+      console.error("The AI service rejected the call:", claude.status, detail);
       return jsonResponse(
         { error: `The AI service returned ${claude.status}.`, detail },
         502,
@@ -177,11 +223,19 @@ Deno.serve(async (req: Request) => {
     }
 
     const result = await claude.json();
-    const summary = (result.content ?? [])
-      .filter((block: { type: string }) => block.type === "text")
-      .map((block: { text: string }) => block.text)
-      .join("")
-      .trim();
+
+    const summary = (GATEWAY_URL
+      ? (result.choices?.[0]?.message?.content ?? "")
+      : (result.content ?? [])
+        .filter((block: { type: string }) => block.type === "text")
+        .map((block: { text: string }) => block.text)
+        .join("")
+    ).trim();
+
+    if (!summary) {
+      console.error("The AI service answered with no text:", JSON.stringify(result));
+      return jsonResponse({ error: "The AI service answered with no text." }, 502);
+    }
 
     return jsonResponse({ summary, counted: (rows ?? []).length });
   } catch (err) {

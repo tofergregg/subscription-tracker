@@ -237,6 +237,32 @@ the function; set a current one as a secret instead:
 supabase secrets set CLAUDE_MODEL=<current-model-id>
 ```
 
+**Your key is from a university or company rather than from Anthropic.** Many
+organizations run a gateway in front of the AI providers so that billing and
+access go through one place, and a key issued that way works only against the
+gateway. Sending it to Anthropic directly returns a 401 saying the key is
+invalid, which is true from Anthropic's point of view: they have never seen it.
+
+Gateways almost always speak the OpenAI dialect rather than Anthropic's, so
+this is not just a different address. Two secrets switch the function over:
+
+```
+supabase secrets set AI_GATEWAY_URL=https://your-gateway/v1/chat/completions
+supabase secrets set CLAUDE_MODEL=<the model id your gateway lists>
+```
+
+For Stanford's AI API Gateway that URL is
+`https://aiapi-prod.stanford.edu/v1/chat/completions`, and the model ids are
+the gateway's own aliases rather than Anthropic's, listed in the Stanford KB
+article. Leave `AI_GATEWAY_URL` unset to talk to Anthropic directly, which is
+what you want with a personal key.
+
+**Telling these two apart is worth learning.** A 401 means your request
+arrived somewhere real and was refused, so the address is right and the
+credential is wrong. A 404, or a connection that never opens, means you are
+talking to the wrong place entirely. People conflate these constantly and
+spend an afternoon regenerating a key that was fine.
+
 **Email stops arriving after a burst.** The Resend free tier is rate limited.
 Fine for one person testing. It is also why Module 6 builds a runs log: once
 this is on a schedule, you need to see the failures you are no longer present
