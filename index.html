@@ -179,6 +179,15 @@
   .ai-body .thinking { color: var(--muted); }
   .ai-body .failed { color: var(--danger); }
   .ai-foot { color: var(--muted); font-size: .78rem; margin-top: 10px; }
+  .flagged-note {
+    background: var(--warn-soft);
+    border: 1px solid #fed7aa;
+    color: var(--warn);
+    border-radius: 9px;
+    padding: 9px 11px;
+    font-size: .84rem;
+    margin: 10px 0 0;
+  }
 
   .empty {
     text-align: center;
@@ -224,6 +233,7 @@
   .field.invalid input, .field.invalid select { border-color: var(--danger); }
   .field.invalid .error { display: block; }
   .modal .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+  .modal .fineprint { color: var(--muted); font-size: .8rem; margin-top: -4px; }
 
   @media (max-width: 560px) {
     .summary { grid-template-columns: 1fr; }
@@ -403,6 +413,23 @@
   </div>
 </div>
 
+<!-- ===================== Module 7: cancellation checkpoint ===================== -->
+<!-- A human confirms the one step that is expensive and awkward to undo. Not
+     every step needs this. A checkpoint on everything is a checkpoint people
+     learn to click through, and a guardrail that gets routed around is worse
+     than none, because it still looks like protection. -->
+<div class="backdrop" id="cancelBackdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cancelTitle">
+    <h2 id="cancelTitle">Mark this as cancelled?</h2>
+    <p id="cancelBody"></p>
+    <p class="fineprint">Cancelled is final in this app. The subscription stays in your list so you keep the spending history, but you cannot set it back to Active.</p>
+    <div class="actions">
+      <button type="button" class="ghost" id="cancelKeepBtn">Keep it active</button>
+      <button type="button" class="primary" id="cancelConfirmBtn">Yes, mark cancelled</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===================== Import-from-browser modal ===================== -->
 <div class="backdrop" id="importBackdrop">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="importTitle">
@@ -505,6 +532,11 @@ const remindBtn    = $("remindBtn");      // Module 5
 const aiPanel      = $("aiPanel");
 const aiBody       = $("aiBody");
 const aiDismiss    = $("aiDismiss");
+
+const cancelBackdrop   = $("cancelBackdrop");   // Module 7
+const cancelBody       = $("cancelBody");
+const cancelKeepBtn    = $("cancelKeepBtn");
+const cancelConfirmBtn = $("cancelConfirmBtn");
 
 const importBackdrop = $("importBackdrop");
 const importBody     = $("importBody");
@@ -1038,13 +1070,25 @@ function render() {
   const visible = filtering ? subs.filter((s) => s.category_id === activeCategory) : subs;
   const filterLabel = filtering ? (categoryName.get(activeCategory) ?? "this category") : null;
 
-  const monthlyTotal = visible.reduce((acc, s) => acc + monthlyEquivalent(s), 0);
+  // Module 7. Totals count only what you are still PAYING for.
+  //
+  // Before this change the cards summed every row, cancelled ones included, so
+  // the headline number was larger than reality by the cost of everything you
+  // had already stopped paying for. That bug survived two modules because
+  // nothing ever checked it: it looked like a number, so it read as a fact.
+  //
+  // The evaluation set in Module 7 is what caught it, and it caught it by
+  // noticing that the app and the AI summary disagreed. Worth remembering
+  // which of the two turned out to be wrong.
+  const counted = visible.filter((s) => s.status !== "Cancelled");
+
+  const monthlyTotal = counted.reduce((acc, s) => acc + monthlyEquivalent(s), 0);
   totalMonthlyEl.textContent = money(monthlyTotal);
   totalYearlyEl.textContent = money(monthlyTotal * 12);
 
   totalMonthlySubEl.textContent = filtering
-    ? filterLabel + " only. Yearly plans counted as 1/12 per month"
-    : "Yearly plans counted as 1/12 per month";
+    ? filterLabel + " only. Active subscriptions, yearly counted as 1/12 per month"
+    : "Active subscriptions. Yearly plans counted as 1/12 per month";
   totalYearlySubEl.textContent = filtering
     ? filterLabel + " only. Annualized estimate (monthly × 12)"
     : "Annualized estimate (monthly × 12)";
@@ -1235,6 +1279,45 @@ function validate() {
 // disabling a dropdown option is a suggestion. A rule REFUSES. "Are you sure?"
 // versus "no."
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Module 7. THE HUMAN CHECKPOINT
+//
+// Sending a suggestion email is cheap and reversible, so it runs on its own.
+// Marking something cancelled is neither: it is terminal in this app, and in
+// the real world it is the step that stops a service you may still want.
+//
+// So a person confirms this one, and the confirmation shows what it costs
+// them, because "are you sure?" with no information is a button people press
+// without reading.
+//
+// Note what this is NOT. It does not refuse anything; the rule below does
+// that. This asks a human, which is a different job, and the two are worth
+// keeping straight.
+// ---------------------------------------------------------------------------
+let cancelResolve = null;
+
+function confirmCancellation(sub) {
+  const per = sub.billing_period === "yearly" ? "a year" : "a month";
+  cancelBody.textContent =
+    '"' + sub.name + '" costs ' + money(sub.cost) + " " + per +
+    ". Marking it cancelled removes it from your monthly total and stops its renewal reminders.";
+  cancelBackdrop.classList.add("open");
+  cancelConfirmBtn.focus();
+  return new Promise((resolve) => { cancelResolve = resolve; });
+}
+
+function settleCancellation(approved) {
+  cancelBackdrop.classList.remove("open");
+  if (cancelResolve) { cancelResolve(approved); cancelResolve = null; }
+}
+
+cancelKeepBtn.addEventListener("click", () => settleCancellation(false));
+cancelConfirmBtn.addEventListener("click", () => settleCancellation(true));
+cancelBackdrop.addEventListener("click", (e) => {
+  // Dismissing counts as declining. The safe answer is the default.
+  if (e.target === cancelBackdrop) settleCancellation(false);
+});
+
 function blockedTransition(existing, nextStatus) {
   if (!existing) return false;                       // a brand new subscription
   return existing.status === "Cancelled" && nextStatus !== "Cancelled";
@@ -1251,6 +1334,19 @@ form.addEventListener("submit", async (e) => {
     $("f-status").classList.add("invalid");
     subStatusEl.value = "Cancelled";   // put the truth back on screen
     return;                            // nothing is written, the modal stays open
+  }
+
+  // Module 7. The checkpoint sits on the one irreversible step, and nowhere
+  // else. Declining leaves the row exactly as it was and writes nothing.
+  const cancellingNow =
+    existing && existing.status !== "Cancelled" && subStatusEl.value === "Cancelled";
+
+  if (cancellingNow) {
+    const approved = await confirmCancellation(existing);
+    if (!approved) {
+      subStatusEl.value = existing.status;
+      return;
+    }
   }
 
   const record = {
@@ -1343,7 +1439,7 @@ async function notifyCancellation(record) {
 // Escaping is not paranoia about the model. The subscription names came from a
 // person typing into a form, the model repeats them back, and anything you
 // insert into a page without escaping is a door. Text is text.
-function renderSummary(text) {
+function renderSummary(text, flagged) {
   const bullets = String(text)
     .split("\n")
     .map((line) => line.replace(/^[-*\u2022]\s*/, "").trim())
@@ -1354,9 +1450,20 @@ function renderSummary(text) {
     return;
   }
 
+  // Module 7. Say when the guardrail held something back. A check that
+  // silently drops data leaves you with a summary that is quietly incomplete,
+  // which is a worse problem than the one the check was protecting you from.
+  let notice = "";
+  if (flagged && flagged.length > 0) {
+    notice = '<p class="flagged-note">Held back from the summary because the text reads like an instruction rather than a name: ' +
+      flagged.map((f) => '"' + escapeHtml(f) + '"').join(", ") +
+      ". Everything else was summarized as usual.</p>";
+  }
+
   aiBody.innerHTML =
     "<ul>" + bullets.map((b) => "<li>" + escapeHtml(b) + "</li>").join("") + "</ul>" +
-    '<p class="ai-foot">Generated by AI from your list. Check the numbers before acting on them.</p>';
+    notice +
+    '<p class="ai-foot">Generated by AI from your list. The total is calculated by the app, not by the AI.</p>';
 }
 
 async function summarize() {
@@ -1378,7 +1485,7 @@ async function summarize() {
     return;
   }
 
-  renderSummary(data && data.summary ? data.summary : "");
+  renderSummary(data && data.summary ? data.summary : "", data && data.flagged);
 }
 
 // ---------------------------------------------------------------------------
@@ -1442,7 +1549,8 @@ importBackdrop.addEventListener("click", (e) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (backdrop.classList.contains("open")) closeModal();
+  if (cancelBackdrop.classList.contains("open")) settleCancellation(false);
+  else if (backdrop.classList.contains("open")) closeModal();
   else if (importBackdrop.classList.contains("open")) { markImportHandled(); closeImport(); }
 });
 
