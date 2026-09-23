@@ -12,3 +12,6 @@ project_id = "rjmgqrnkuooqqitwbbrz"
 # holding the email credential.
 [functions.notify-cancellation]
 verify_jwt = true
+
+[functions.summarize-subscriptions]
+verify_jwt = true
