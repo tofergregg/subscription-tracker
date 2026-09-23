@@ -18,3 +18,8 @@ verify_jwt = true
 
 [functions.send-renewal-reminder]
 verify_jwt = true
+
+# The schedule has no signed-in user to present, so this one cannot verify a
+# session. It checks a shared secret instead: see the function's own header.
+[functions.scheduled-reminders]
+verify_jwt = false
