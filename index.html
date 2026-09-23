@@ -82,9 +82,18 @@
   .summary .value { font-size: 1.7rem; font-weight: 700; margin-top: 4px; }
   .summary .sub { color: var(--muted); font-size: .8rem; margin-top: 2px; }
 
-  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0 14px; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0 14px; flex-wrap: wrap; }
   .toolbar .count { color: var(--muted); font-size: .9rem; }
-  .toolbar .left-side { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .toolbar .left-side { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+  .toolbar select {
+    font: inherit;
+    font-size: .9rem;
+    padding: 6px 28px 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #fff;
+    color: var(--ink);
+  }
 
   /* Save status pill */
   .status { font-size: .8rem; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
@@ -142,6 +151,8 @@
   .badge.rating.cancel { background: #fee2e2; color: var(--danger); }
   .badge.soon { background: var(--warn-soft); color: var(--warn); border-color: #fed7aa; }
   .badge.past { background: #f3f4f6; color: var(--muted); border-color: var(--line); }
+  .badge.cat { background: #eef1f6; color: #414c63; border-color: #dfe4ec; }
+  .badge.manual { background: #fffbeb; color: var(--warn); border-color: #fde68a; }
 
   .row-actions { display: flex; gap: 8px; }
 
@@ -254,17 +265,20 @@
     <div class="box">
       <div class="label">Total monthly</div>
       <div class="value" id="totalMonthly">$0.00</div>
-      <div class="sub">Yearly plans counted as 1/12 per month</div>
+      <div class="sub" id="totalMonthlySub">Yearly plans counted as 1/12 per month</div>
     </div>
     <div class="box">
       <div class="label">Total yearly</div>
       <div class="value" id="totalYearly">$0.00</div>
-      <div class="sub">Annualized estimate (monthly &times; 12)</div>
+      <div class="sub" id="totalYearlySub">Annualized estimate (monthly &times; 12)</div>
     </div>
   </section>
 
   <div class="toolbar">
     <div class="left-side">
+      <select id="catFilter" aria-label="Filter by category">
+        <option value="all">All categories</option>
+      </select>
       <span class="count" id="count">0 subscriptions</span>
       <span class="status hidden" id="status"></span>
     </div>
@@ -301,6 +315,23 @@
         <label for="renewal">Next renewal date</label>
         <input type="date" id="renewal">
         <div class="error">Please choose a renewal date.</div>
+      </div>
+      <div class="field" id="f-category">
+        <label for="category">Category</label>
+        <select id="category">
+          <option value="">Choose a category…</option>
+        </select>
+        <div class="error">Please choose a category.</div>
+      </div>
+      <div class="field" id="f-autorenew">
+        <label for="autorenew">Renews automatically?</label>
+        <select id="autorenew">
+          <option value="">Choose one…</option>
+          <option value="yes">Yes, it charges me on its own</option>
+          <option value="no">No, I have to renew it myself</option>
+        </select>
+        <div class="hint">Leaving this unanswered isn't possible: the database now requires a yes or no.</div>
+        <div class="error">Please choose yes or no.</div>
       </div>
       <div class="field" id="f-rating">
         <label for="rating">Usage rating</label>
@@ -397,7 +428,10 @@ const statusEl    = $("status");
 const listEl         = $("list");
 const totalMonthlyEl = $("totalMonthly");
 const totalYearlyEl  = $("totalYearly");
+const totalMonthlySubEl = $("totalMonthlySub");
+const totalYearlySubEl  = $("totalYearlySub");
 const countEl        = $("count");
+const catFilterEl    = $("catFilter");
 
 const backdrop   = $("backdrop");
 const form       = $("subForm");
@@ -407,6 +441,8 @@ const nameEl     = $("name");
 const costEl     = $("cost");
 const freqEl     = $("frequency");
 const renewalEl  = $("renewal");
+const categoryEl = $("category");
+const autoRenewEl= $("autorenew");
 const ratingEl   = $("rating");
 const saveBtn    = $("saveBtn");
 const addBtn     = $("addBtn");
@@ -422,6 +458,13 @@ const importSkipBtn  = $("importSkipBtn");
 let subs = [];          // rows straight from the database
 let householdId = null; // which household we read and write
 let currentUser = null;
+
+// Module 2. The category list is read-only from the browser: the security rule
+// on the categories table allows select and nothing else, so this is fetched
+// once per session and never written to. Edit the list in the SQL Editor.
+let categories = [];            // [{id, name}]
+let categoryName = new Map();   // id -> name, for rendering badges
+let activeCategory = "all";     // current filter, "all" or a category id
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -618,6 +661,11 @@ async function startSession() {
 
   householdId = data[0].household_id;
 
+  // Categories must be in hand before anything can be added, because
+  // category_id is required on every subscription row.
+  const gotCategories = await loadCategories();
+  if (stale() || !gotCategories) return;
+
   const loaded = await loadSubs();
   if (stale() || !loaded) return;
 
@@ -626,10 +674,68 @@ async function startSession() {
   maybeOfferImport();
 }
 
+// Module 2. Read the fixed category list once per session.
+async function loadCategories() {
+  const { data, error } = await supabase
+    .from("categories")
+    .select("id, name")
+    .order("name", { ascending: true });
+
+  if (error) {
+    setStatus(null);
+    // By far the likeliest cause is the migration not having been run.
+    showAppError(
+      "Couldn't load your categories: " + error.message +
+      " If this says the table doesn't exist, run schema-module2-categories.sql " +
+      "in the Supabase SQL Editor."
+    );
+    return false;
+  }
+
+  if (!data || data.length === 0) {
+    setStatus(null);
+    showAppError(
+      "There are no categories yet, and every subscription needs one. Add at least " +
+      "one row to the categories table in the Supabase SQL Editor, then reload."
+    );
+    return false;
+  }
+
+  categories = data;
+  categoryName = new Map(categories.map((c) => [c.id, c.name]));
+  fillCategoryControls();
+  return true;
+}
+
+// Populates both dropdowns: the filter above the list and the one in the form.
+// Rebuilt from scratch each time so it can never drift from `categories`.
+function fillCategoryControls() {
+  const previousFilter = activeCategory;
+
+  catFilterEl.innerHTML = '<option value="all">All categories</option>';
+  categoryEl.innerHTML  = '<option value="">Choose a category…</option>';
+
+  categories.forEach((c) => {
+    const filterOpt = document.createElement("option");
+    filterOpt.value = c.id;
+    filterOpt.textContent = c.name;
+    catFilterEl.appendChild(filterOpt);
+
+    const formOpt = document.createElement("option");
+    formOpt.value = c.id;
+    formOpt.textContent = c.name;
+    categoryEl.appendChild(formOpt);
+  });
+
+  // Keep the user's filter if that category still exists.
+  activeCategory = categoryName.has(previousFilter) ? previousFilter : "all";
+  catFilterEl.value = activeCategory;
+}
+
 async function loadSubs() {
   const { data, error } = await supabase
     .from("subscriptions")
-    .select("id, name, cost, currency, billing_period, next_renewal, rating, notes")
+    .select("id, name, cost, currency, billing_period, next_renewal, rating, notes, category_id, auto_renew")
     .eq("household_id", householdId)
     .eq("is_active", true)
     .order("created_at", { ascending: true });
@@ -723,8 +829,23 @@ function legacyToRow(s) {
     cost,
     billing_period: (s.billing_period ?? s.frequency) === "yearly" ? "yearly" : "monthly",
     next_renewal: renewal,
-    rating: RATINGS.includes(s.rating) ? s.rating : "Like it"
+    rating: RATINGS.includes(s.rating) ? s.rating : "Like it",
+
+    // Module 2. These two columns are required with no database default, so an
+    // import that omitted them would be rejected outright. Old browser records
+    // predate both fields and cannot say anything about them, so they get the
+    // same treatment the migration gave your existing rows: Uncategorized, and
+    // auto_renew true. Both are editable afterwards.
+    category_id: defaultCategoryId(),
+    auto_renew: true
   };
+}
+
+// "Uncategorized" if the migration's row is still there, otherwise the first
+// category alphabetically. Never null, because the column forbids it.
+function defaultCategoryId() {
+  const uncategorized = categories.find((c) => c.name === "Uncategorized");
+  return (uncategorized ?? categories[0]).id;
 }
 
 function readLegacyData() {
@@ -803,17 +924,36 @@ importDoBtn.addEventListener("click", async () => {
 // RENDERING
 // ---------------------------------------------------------------------------
 function render() {
-  const monthlyTotal = subs.reduce((acc, s) => acc + monthlyEquivalent(s), 0);
+  // Module 2. The filter narrows everything on screen, totals included. Totals
+  // that ignored the filter would be the more confusing choice: you'd select
+  // Entertainment, see three cards, and read a number covering all twelve.
+  const filtering = activeCategory !== "all";
+  const visible = filtering ? subs.filter((s) => s.category_id === activeCategory) : subs;
+  const filterLabel = filtering ? (categoryName.get(activeCategory) ?? "this category") : null;
+
+  const monthlyTotal = visible.reduce((acc, s) => acc + monthlyEquivalent(s), 0);
   totalMonthlyEl.textContent = money(monthlyTotal);
   totalYearlyEl.textContent = money(monthlyTotal * 12);
 
-  countEl.textContent = subs.length + (subs.length === 1 ? " subscription" : " subscriptions");
+  totalMonthlySubEl.textContent = filtering
+    ? filterLabel + " only. Yearly plans counted as 1/12 per month"
+    : "Yearly plans counted as 1/12 per month";
+  totalYearlySubEl.textContent = filtering
+    ? filterLabel + " only. Annualized estimate (monthly × 12)"
+    : "Annualized estimate (monthly × 12)";
+
+  countEl.textContent =
+    visible.length + (visible.length === 1 ? " subscription" : " subscriptions") +
+    (filtering ? " in " + filterLabel : "");
 
   // Most expensive per month first.
-  const sorted = subs.slice().sort((a, b) => monthlyEquivalent(b) - monthlyEquivalent(a));
+  const sorted = visible.slice().sort((a, b) => monthlyEquivalent(b) - monthlyEquivalent(a));
 
   if (sorted.length === 0) {
-    listEl.innerHTML = '<div class="empty">No subscriptions yet. Click &ldquo;Add subscription&rdquo; to get started.</div>';
+    listEl.innerHTML = filtering
+      ? '<div class="empty">Nothing in ' + escapeHtml(filterLabel) +
+        '. Choose &ldquo;All categories&rdquo; to see everything.</div>'
+      : '<div class="empty">No subscriptions yet. Click &ldquo;Add subscription&rdquo; to get started.</div>';
     return;
   }
 
@@ -829,23 +969,37 @@ function render() {
 
     const perLabel = s.billing_period === "yearly" ? "/year" : "/month";
 
+    // Module 2. auto_renew changes what the countdown MEANS, so it changes the
+    // wording. A card that auto-renews is warning you about a charge you can
+    // still stop; one that doesn't is warning you about access you're about to
+    // lose unless you act. Same date, opposite thing to do about it.
+    const willRenew = s.auto_renew !== false;
+    const verb = willRenew ? "Renews" : "Expires";
+
     let timingBadge = "";
     if (days === 0) {
-      timingBadge = '<span class="badge soon">Renews today</span>';
+      timingBadge = '<span class="badge soon">' + verb + " today</span>";
     } else if (soon) {
-      timingBadge = '<span class="badge soon">Renews in ' + days + (days === 1 ? " day" : " days") + "</span>";
+      timingBadge = '<span class="badge soon">' + verb + " in " + days + (days === 1 ? " day" : " days") + "</span>";
     } else if (past) {
-      timingBadge = '<span class="badge past">Renewal date has passed</span>';
+      timingBadge = '<span class="badge past">' +
+        (willRenew ? "Renewal date has passed" : "Expiry date has passed") + "</span>";
     }
 
     const ratingBadge =
       '<span class="badge rating' + (isCancel ? " cancel" : "") + '">' + escapeHtml(s.rating) + "</span>";
 
+    const catBadge = s.category_id && categoryName.has(s.category_id)
+      ? '<span class="badge cat">' + escapeHtml(categoryName.get(s.category_id)) + "</span>"
+      : "";
+
+    const manualBadge = willRenew ? "" : '<span class="badge manual">Manual renewal</span>';
+
     card.innerHTML =
       '<div class="left">' +
         '<div class="name">' + escapeHtml(s.name) + "</div>" +
-        '<div class="meta">Renews ' + formatDate(s.next_renewal) + "</div>" +
-        '<div class="badges">' + ratingBadge + timingBadge + "</div>" +
+        '<div class="meta">' + (willRenew ? "Renews " : "Expires ") + formatDate(s.next_renewal) + "</div>" +
+        '<div class="badges">' + catBadge + ratingBadge + manualBadge + timingBadge + "</div>" +
       "</div>" +
       '<div class="right">' +
         '<div class="cost">' + money(s.cost) + '<span class="per"> ' + perLabel + "</span></div>" +
@@ -872,12 +1026,28 @@ function openModal(sub) {
     freqEl.value = sub.billing_period;
     renewalEl.value = sub.next_renewal;
     ratingEl.value = sub.rating;
+    categoryEl.value = sub.category_id ?? "";
+    autoRenewEl.value = sub.auto_renew === false ? "no" : "yes";
   } else {
     modalTitle.textContent = "Add subscription";
     form.reset();
     editIdField.value = "";
     freqEl.value = "monthly";
     ratingEl.value = "Love it";
+
+    // Module 2. Deliberately left unchosen. You removed the database default
+    // on auto_renew, which means "make the app ask every time" rather than
+    // "have the app quietly guess true". Pre-filling either dropdown here
+    // would put the guess back. If this gets tiresome, say so and I'll
+    // pre-select the common answers; it's a two-line change.
+    categoryEl.value = "";
+    autoRenewEl.value = "";
+
+    // If the list is filtered, you almost certainly want the thing you're
+    // adding to land in the category you're looking at.
+    if (activeCategory !== "all" && categoryName.has(activeCategory)) {
+      categoryEl.value = activeCategory;
+    }
   }
   backdrop.classList.add("open");
   nameEl.focus();
@@ -888,7 +1058,8 @@ function closeModal() {
 }
 
 function clearErrors() {
-  ["f-name", "f-cost", "f-date"].forEach((id) => $(id).classList.remove("invalid"));
+  ["f-name", "f-cost", "f-date", "f-category", "f-autorenew"].forEach((id) =>
+    $(id).classList.remove("invalid"));
 }
 
 function validate() {
@@ -909,6 +1080,15 @@ function validate() {
   if (renewalEl.value === "") {
     $("f-date").classList.add("invalid"); ok = false;
   }
+  // Module 2. Both of these are checked here rather than left to the database,
+  // so you get a highlighted field instead of a raw "null value violates
+  // not-null constraint" from Postgres.
+  if (!categoryName.has(categoryEl.value)) {
+    $("f-category").classList.add("invalid"); ok = false;
+  }
+  if (autoRenewEl.value !== "yes" && autoRenewEl.value !== "no") {
+    $("f-autorenew").classList.add("invalid"); ok = false;
+  }
   return ok;
 }
 
@@ -921,7 +1101,9 @@ form.addEventListener("submit", async (e) => {
     cost: Math.round(parseFloat(costEl.value) * 100) / 100,
     billing_period: freqEl.value,
     next_renewal: renewalEl.value,
-    rating: ratingEl.value
+    rating: ratingEl.value,
+    category_id: categoryEl.value,
+    auto_renew: autoRenewEl.value === "yes"
   };
 
   const id = editIdField.value;
@@ -940,6 +1122,13 @@ form.addEventListener("submit", async (e) => {
 // ---------------------------------------------------------------------------
 addBtn.addEventListener("click", () => openModal(null));
 $("cancelBtn").addEventListener("click", closeModal);
+
+// Module 2. Filtering is purely local: the rows are already in memory, so
+// there's no reason to go back to the network for it.
+catFilterEl.addEventListener("change", () => {
+  activeCategory = catFilterEl.value;
+  render();
+});
 
 backdrop.addEventListener("click", (e) => {
   if (e.target === backdrop) closeModal();

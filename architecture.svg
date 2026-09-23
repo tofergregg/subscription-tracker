@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="526" viewBox="0 0 680 526" role="img" aria-labelledby="diagTitle diagDesc">
+  <title id="diagTitle">Subscription Tracker architecture</title>
+  <desc id="diagDesc">Three stacked tiers. The frontend tier contains the sign-in screen, subscription list, and add-and-edit form. The logic tier contains cost totals, renewal warnings, and form validation. The data layer contains the subscriptions, households, and household_members tables, with Row Level Security enforced on every query. User actions flow between the frontend and logic tiers; the logic tier reaches the data layer over HTTPS to Supabase.</desc>
+
+  <style>
+    .tier-title { font: 500 14px system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .item       { font: 400 12px system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #2C2C2A; }
+    .edge       { font: 400 12px system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #5F5E5A; }
+    .box        { fill: #FFFFFF; stroke: #B4B2A9; stroke-width: 1; }
+    .arrow      { stroke: #5F5E5A; stroke-width: 1.5; fill: none; }
+  </style>
+
+  <rect x="0" y="0" width="680" height="526" fill="#FFFFFF"/>
+
+  <rect x="60" y="50" width="560" height="112" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1"/>
+  <text class="tier-title" x="76" y="76" fill="#3C3489">Frontend: the web interface</text>
+  <rect class="box" x="76"  y="88" width="168" height="48" rx="4"/>
+  <text class="item" x="160" y="117" text-anchor="middle">Sign-in screen</text>
+  <rect class="box" x="256" y="88" width="168" height="48" rx="4"/>
+  <text class="item" x="340" y="117" text-anchor="middle">Subscription list</text>
+  <rect class="box" x="436" y="88" width="168" height="48" rx="4"/>
+  <text class="item" x="520" y="117" text-anchor="middle">Add and edit form</text>
+
+  <line class="arrow" x1="340" y1="164" x2="340" y2="196"/>
+  <path class="arrow" d="M334 190 L340 198 L346 190"/>
+  <text class="edge" x="352" y="185">user actions</text>
+
+  <rect x="60" y="202" width="560" height="112" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+  <text class="tier-title" x="76" y="228" fill="#085041">Logic: rules and calculations</text>
+  <rect class="box" x="76"  y="240" width="168" height="48" rx="4"/>
+  <text class="item" x="160" y="269" text-anchor="middle">Cost totals</text>
+  <rect class="box" x="256" y="240" width="168" height="48" rx="4"/>
+  <text class="item" x="340" y="269" text-anchor="middle">Renewal warnings</text>
+  <rect class="box" x="436" y="240" width="168" height="48" rx="4"/>
+  <text class="item" x="520" y="269" text-anchor="middle">Form validation</text>
+
+  <line class="arrow" x1="340" y1="316" x2="340" y2="348"/>
+  <path class="arrow" d="M334 342 L340 350 L346 342"/>
+  <text class="edge" x="352" y="337">HTTPS to Supabase</text>
+
+  <rect x="60" y="354" width="560" height="152" rx="8" fill="#FAECE7" stroke="#993C1D" stroke-width="1"/>
+  <text class="tier-title" x="76" y="380" fill="#712B13">Data layer: the database</text>
+  <rect class="box" x="76"  y="392" width="168" height="48" rx="4"/>
+  <text class="item" x="160" y="421" text-anchor="middle">subscriptions</text>
+  <rect class="box" x="256" y="392" width="168" height="48" rx="4"/>
+  <text class="item" x="340" y="421" text-anchor="middle">households</text>
+  <rect class="box" x="436" y="392" width="168" height="48" rx="4"/>
+  <text class="item" x="520" y="421" text-anchor="middle">household_members</text>
+  <rect class="box" x="76" y="450" width="528" height="36" rx="4"/>
+  <text class="item" x="340" y="473" text-anchor="middle">Row Level Security: enforced on every query</text>
+</svg>

@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Subscription Tracker (Demo)</title>
+<!--
+  ===========================================================================
+  DEMO BUILD - NO AUTHENTICATION
+  ===========================================================================
+  ADDED IN THIS VERSION: a "status" field, separate from the usage rating.
+  See the STATUS block further down for the rule it enforces.
+  ===========================================================================
+  This is a taping copy of index.html. Two things are different, and only
+  two:
+
+    1. There is no sign-in. The app opens straight into the list with
+       cgregg@stanford.edu shown as the signed-in user.
+    2. Data is read from and written to this browser's local storage instead
+       of the Supabase database over the network.
+
+  Everything the camera sees - layout, wording, the save-status pill, the
+  add/edit modal, the import prompt - is unchanged from the real app.
+
+  Because nothing is fetched from the internet, this file works offline and
+  will never stall on a slow network mid-take. Open it by double-clicking.
+
+  index.html remains the real version with Supabase auth. Nothing here
+  touches it.
+  ===========================================================================
+-->
+<style>
+  :root {
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --ink: #1c2333;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --accent: #3b5bdb;
+    --accent-soft: #eef2ff;
+    --warn: #b45309;
+    --warn-soft: #fff7ed;
+    --danger: #b91c1c;
+    --danger-soft: #fef2f2;
+    --ok: #047857;
+    --shadow: 0 1px 3px rgba(16,24,40,.08), 0 1px 2px rgba(16,24,40,.04);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.45;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+
+  .hidden { display: none !important; }
+
+  header.app { margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  header.app h1 { font-size: 1.55rem; margin: 0 0 4px; }
+  header.app p { margin: 0; color: var(--muted); font-size: .95rem; }
+  header.app .who { text-align: right; font-size: .82rem; color: var(--muted); white-space: nowrap; }
+  header.app .who .email { display: block; margin-bottom: 6px; overflow-wrap: anywhere; white-space: normal; }
+
+  .notice {
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: .9rem;
+    margin-bottom: 16px;
+  }
+  .notice.err  { background: var(--danger-soft); color: var(--danger); border: 1px solid #fecaca; }
+  .notice.good { background: #ecfdf5; color: var(--ok); border: 1px solid #a7f3d0; }
+
+  /* Summary cards */
+  .summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 18px 0;
+  }
+  .summary .box {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: var(--shadow);
+  }
+  .summary .label { color: var(--muted); font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; }
+  .summary .value { font-size: 1.7rem; font-weight: 700; margin-top: 4px; }
+  .summary .sub { color: var(--muted); font-size: .8rem; margin-top: 2px; }
+
+  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0 14px; }
+  .toolbar .count { color: var(--muted); font-size: .9rem; }
+  .toolbar .left-side { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+  /* Save status pill */
+  .status { font-size: .8rem; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
+  .status.busy { background: var(--accent-soft); color: var(--accent); }
+  .status.ok   { background: #ecfdf5; color: var(--ok); }
+  .status.err  { background: var(--danger-soft); color: var(--danger); }
+
+  /* Demo-mode tag. Deliberately quiet so it doesn't fight with the app on
+     camera, but present so a viewer isn't misled about the sign-in step. */
+  .demo-tag {
+    display: inline-block;
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--warn-soft);
+    color: var(--warn);
+    border: 1px solid #fed7aa;
+    vertical-align: middle;
+    margin-left: 8px;
+  }
+
+  button {
+    font: inherit;
+    cursor: pointer;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    padding: 9px 14px;
+  }
+  button.primary { background: var(--accent); color: #fff; }
+  button.primary:hover { background: #30489e; }
+  button.ghost { background: transparent; border-color: var(--line); color: var(--ink); }
+  button.ghost:hover { background: #f0f2f7; }
+  button.small { padding: 6px 10px; font-size: .85rem; }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+
+  /* Subscription list */
+  .list { display: flex; flex-direction: column; gap: 12px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 5px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .card.cancel { border-left-color: var(--danger); background: var(--danger-soft); }
+
+  /* A cancelled subscription is history, not something to act on, so it
+     recedes. Declared after .card.cancel and repeated with both classes so it
+     also wins over the red "Cancel soon" treatment: a dead subscription
+     shouldn't be shouting for attention. The rating badge itself is untouched,
+     so no information is lost, it's just quieter. */
+  .card.is-cancelled,
+  .card.cancel.is-cancelled {
+    background: #fafbfc;
+    border-left-color: var(--line);
+    opacity: .62;
+  }
+  .card.is-cancelled .name { text-decoration: line-through; text-decoration-color: var(--muted); }
+
+  .card .name { font-weight: 650; font-size: 1.05rem; }
+  .card .meta { color: var(--muted); font-size: .9rem; margin-top: 3px; }
+  .card .cost { font-weight: 700; white-space: nowrap; }
+  .card .cost .per { color: var(--muted); font-weight: 400; font-size: .82rem; }
+  .card .left { min-width: 0; }
+  .card .right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .badge {
+    display: inline-block;
+    font-size: .74rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+  }
+  .badge.rating { background: var(--accent-soft); color: var(--accent); }
+  .badge.rating.cancel { background: #fee2e2; color: var(--danger); }
+  .badge.soon { background: var(--warn-soft); color: var(--warn); border-color: #fed7aa; }
+  .badge.past { background: #f3f4f6; color: var(--muted); border-color: var(--line); }
+  /* Status badges. Deliberately a different shape of colour from the rating
+     badges so the two read as separate kinds of information at a glance. */
+  .badge.state-active    { background: #ecfdf5; color: var(--ok); border-color: #a7f3d0; }
+  .badge.state-cancelled { background: #f3f4f6; color: var(--muted); border-color: var(--line); }
+
+  .row-actions { display: flex; gap: 8px; }
+
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    background: var(--card);
+    border: 1px dashed var(--line);
+    border-radius: 12px;
+    padding: 40px 20px;
+  }
+
+  /* Modal form */
+  .backdrop {
+    position: fixed; inset: 0;
+    background: rgba(16,24,40,.45);
+    display: none;
+    align-items: center; justify-content: center;
+    padding: 16px;
+    z-index: 50;
+  }
+  .backdrop.open { display: flex; }
+  .modal {
+    background: var(--card);
+    border-radius: 14px;
+    width: 100%; max-width: 460px;
+    padding: 20px;
+    box-shadow: 0 20px 40px rgba(16,24,40,.25);
+  }
+  .modal h2 { margin: 0 0 14px; font-size: 1.2rem; }
+  .modal p { font-size: .92rem; color: var(--muted); }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: .85rem; font-weight: 600; margin-bottom: 4px; }
+  .field input, .field select {
+    width: 100%;
+    font: inherit;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #fff;
+    color: var(--ink);
+  }
+  .field .hint { color: var(--muted); font-size: .78rem; margin-top: 3px; }
+  .field .error { color: var(--danger); font-size: .8rem; margin-top: 4px; display: none; }
+  .field.invalid input, .field.invalid select { border-color: var(--danger); }
+  .field.invalid .error { display: block; }
+  .modal .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+
+  /* Where a refused status change is explained. Sits inside the modal so the
+     message appears next to the control that caused it. */
+  .modal .blocked {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: .88rem;
+    margin-bottom: 12px;
+  }
+
+  @media (max-width: 560px) {
+    .summary { grid-template-columns: 1fr; }
+    .card { flex-direction: column; }
+    .card .right { text-align: left; align-items: flex-start; width: 100%; }
+    .row-actions { width: 100%; }
+    .row-actions button { flex: 1; }
+    header.app { flex-direction: column; }
+    header.app .who { text-align: left; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===================== The app =====================
+     No boot screen and no sign-in screen in this build. There is nothing to
+     wait for, so the list is on screen the instant the page paints. -->
+<div class="wrap" id="appView">
+  <header class="app">
+    <div>
+      <h1>Subscription Tracker<span class="demo-tag" title="Sign-in is disabled in this build">Demo</span></h1>
+      <p>Track your recurring subscriptions. Saved to your account.</p>
+    </div>
+    <div class="who">
+      <span class="email" id="userEmail"></span>
+      <button class="ghost small" id="resetBtn" title="Clear the list and restore the starting sample data">Reset demo</button>
+    </div>
+  </header>
+
+  <div class="notice err hidden" id="appError"></div>
+
+  <section class="summary" aria-label="Cost summary">
+    <div class="box">
+      <div class="label">Total monthly</div>
+      <div class="value" id="totalMonthly">$0.00</div>
+      <div class="sub">Yearly plans counted as 1/12 per month</div>
+    </div>
+    <div class="box">
+      <div class="label">Total yearly</div>
+      <div class="value" id="totalYearly">$0.00</div>
+      <div class="sub">Annualized estimate (monthly &times; 12)</div>
+    </div>
+  </section>
+
+  <div class="toolbar">
+    <div class="left-side">
+      <span class="count" id="count">0 subscriptions</span>
+      <span class="status hidden" id="status"></span>
+    </div>
+    <button class="primary" id="addBtn">+ Add subscription</button>
+  </div>
+
+  <div class="list" id="list"></div>
+</div>
+
+<!-- ===================== Add / edit modal ===================== -->
+<div class="backdrop" id="backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h2 id="modalTitle">Add subscription</h2>
+    <div class="blocked hidden" id="statusBlocked"></div>
+    <form id="subForm" novalidate>
+      <input type="hidden" id="editId">
+      <div class="field" id="f-name">
+        <label for="name">Name</label>
+        <input type="text" id="name" placeholder="e.g. Streamly" maxlength="60">
+        <div class="error">Please enter a name.</div>
+      </div>
+      <div class="field" id="f-cost">
+        <label for="cost">Cost (USD)</label>
+        <input type="number" id="cost" step="0.01" min="0" max="99999999.99" placeholder="e.g. 9.99">
+        <div class="error">Please enter a cost between 0 and 99,999,999.99.</div>
+      </div>
+      <div class="field" id="f-freq">
+        <label for="frequency">Billing frequency</label>
+        <select id="frequency">
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </div>
+      <div class="field" id="f-date">
+        <label for="renewal">Next renewal date</label>
+        <input type="date" id="renewal">
+        <div class="error">Please choose a renewal date.</div>
+      </div>
+      <div class="field" id="f-rating">
+        <label for="rating">Usage rating</label>
+        <select id="rating">
+          <option value="Love it">Love it</option>
+          <option value="Like it">Like it</option>
+          <option value="Meh">Meh</option>
+          <option value="Cancel soon">Cancel soon</option>
+        </select>
+      </div>
+      <!-- Status is a separate field from the rating above. The rating is an
+           opinion; this is a fact about whether the subscription is still
+           being paid for. The two are never merged. -->
+      <div class="field" id="f-status">
+        <label for="status-select">Status</label>
+        <select id="status-select">
+          <option value="Active">Active</option>
+          <option value="Cancelled">Cancelled</option>
+        </select>
+        <div class="hint">Cancelling is permanent. A cancelled subscription can't be made active again.</div>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" id="cancelBtn">Cancel</button>
+        <button type="submit" class="primary" id="saveBtn">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===================== Import-from-browser modal ===================== -->
+<div class="backdrop" id="importBackdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="importTitle">
+    <h2 id="importTitle">Import your existing subscriptions?</h2>
+    <p id="importBody"></p>
+    <div class="actions">
+      <button type="button" class="ghost" id="importSkipBtn">No thanks</button>
+      <button type="button" class="primary" id="importDoBtn">Import them</button>
+    </div>
+  </div>
+</div>
+
+<!--
+  A plain script, not type="module", and no imports. Nothing is fetched, so
+  there is no loading-failure case to guard against and no boot timer.
+-->
+<script>
+(function () {
+  "use strict";
+
+  // ==========================================================================
+  // DEMO IDENTITY
+  //
+  // Stands in for the signed-in Supabase user. Only the email is ever shown.
+  // ==========================================================================
+  const DEMO_USER = { email: "cgregg@stanford.edu" };
+
+  // Where this build keeps its data. A key of its own, so taping never reads
+  // or writes the real app's data and vice versa.
+  const STORE_KEY = "subscription-tracker.demo.v1";
+
+  // The old browser-only storage the real app offers to import from. Kept
+  // here verbatim so the import prompt demos exactly as it does live.
+  const LEGACY_KEY = "subscription-tracker.v1";
+  const IMPORT_DONE_KEY = "subscription-tracker.demo.imported";
+
+  // A short pause before each save completes. Without it the status pill
+  // flickers past too fast to read on video; with it the "Saving… / Saved"
+  // beat is visible. Set to 0 for instant saves.
+  const SAVE_DELAY_MS = 260;
+
+  const MAX_COST = 99999999.99;
+  const RATINGS = ["Love it", "Like it", "Meh", "Cancel soon"];
+
+  // ==========================================================================
+  // STATUS
+  //
+  // A second field, entirely separate from the usage rating. The rating is an
+  // opinion ("Meh"); the status is a fact (am I still paying for this?).
+  //
+  // The rule: Active -> Cancelled is allowed. Cancelled -> Active is not, ever.
+  // Re-subscribing in real life almost always means a different price and a
+  // different renewal date, so the honest record of that is a new
+  // subscription, not a resurrected old one.
+  // ==========================================================================
+  const STATUSES = ["Active", "Cancelled"];
+  const DEFAULT_STATUS = "Active";
+
+  // Anything unrecognised, missing, or hand-mangled reads as Active. This is
+  // what silently gives every subscription created before this change a valid
+  // status without rewriting or risking a single stored record.
+  function normalizeStatus(value) {
+    return STATUSES.indexOf(value) !== -1 ? value : DEFAULT_STATUS;
+  }
+
+  // The rule itself, in one place. Returns {ok:true} or {ok:false, reason}.
+  //
+  // Called by the data layer on every write, which is what makes this a rule
+  // rather than a suggestion. The modal calls it too so the message appears
+  // immediately, but that call is a convenience: deleting it would change when
+  // you see the message, not whether the change is refused.
+  function checkStatusChange(from, to) {
+    const prev = normalizeStatus(from);
+    const next = normalizeStatus(to);
+
+    if (prev === next) return { ok: true };          // not a change at all
+    if (prev === "Cancelled" && next === "Active") {
+      return {
+        ok: false,
+        reason: "This subscription is cancelled, and that's permanent. " +
+                "If you've signed up again, add it as a new subscription: " +
+                "the price and renewal date are usually different the second time around."
+      };
+    }
+    return { ok: true };                              // Active -> Cancelled
+  }
+
+  function isCancelled(sub) {
+    return normalizeStatus(sub.status) === "Cancelled";
+  }
+
+  // ------------------------------------------------------------------------
+  // Element lookups
+  // ------------------------------------------------------------------------
+  const $ = (id) => document.getElementById(id);
+
+  const userEmailEl = $("userEmail");
+  const resetBtn    = $("resetBtn");
+  const appError    = $("appError");
+  const statusEl    = $("status");
+
+  const listEl         = $("list");
+  const totalMonthlyEl = $("totalMonthly");
+  const totalYearlyEl  = $("totalYearly");
+  const countEl        = $("count");
+
+  const backdrop    = $("backdrop");
+  const statusBlockedEl = $("statusBlocked");
+  const form        = $("subForm");
+  const modalTitle  = $("modalTitle");
+  const editIdField = $("editId");
+  const nameEl      = $("name");
+  const costEl      = $("cost");
+  const freqEl      = $("frequency");
+  const renewalEl   = $("renewal");
+  const ratingEl    = $("rating");
+  const statusSelectEl = $("status-select");
+  const saveBtn     = $("saveBtn");
+  const addBtn      = $("addBtn");
+
+  const importBackdrop = $("importBackdrop");
+  const importBody     = $("importBody");
+  const importDoBtn    = $("importDoBtn");
+  const importSkipBtn  = $("importSkipBtn");
+
+  // ------------------------------------------------------------------------
+  // State
+  // ------------------------------------------------------------------------
+  let subs = [];
+
+  // ------------------------------------------------------------------------
+  // Small helpers (identical to the real app)
+  // ------------------------------------------------------------------------
+  function show(el) { el.classList.remove("hidden"); }
+  function hide(el) { el.classList.add("hidden"); }
+
+  function money(n) {
+    return "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function monthlyEquivalent(sub) {
+    return sub.billing_period === "yearly" ? Number(sub.cost) / 12 : Number(sub.cost);
+  }
+
+  function daysUntil(dateStr) {
+    const parts = dateStr.split("-").map(Number);
+    const target = new Date(parts[0], parts[1] - 1, parts[2]);
+    const now = new Date();
+    const todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.round((target - todayMid) / 86400000);
+  }
+
+  function formatDate(dateStr) {
+    const parts = dateStr.split("-").map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2])
+      .toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // Today plus n days, as YYYY-MM-DD in local time. Used for the sample data
+  // so the "renews in N days" badges are always accurate whenever you tape,
+  // rather than being hardcoded dates that go stale.
+  function dateOffset(days) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return d.getFullYear() + "-" + mm + "-" + dd;
+  }
+
+  function newId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    return "id-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  let statusTimer = null;
+  function setStatus(kind, text) {
+    clearTimeout(statusTimer);
+    if (!kind) { hide(statusEl); return; }
+    statusEl.className = "status " + kind;
+    statusEl.textContent = text;
+    show(statusEl);
+    if (kind === "ok") statusTimer = setTimeout(() => hide(statusEl), 2000);
+  }
+
+  function showAppError(message) {
+    appError.textContent = message;
+    show(appError);
+  }
+  function clearAppError() {
+    hide(appError);
+  }
+
+  // ==========================================================================
+  // DATA LAYER - browser storage instead of the database
+  //
+  // Same shape as the real app's: read the whole list, write the whole list,
+  // re-render from what was actually stored. The functions are still async so
+  // the calling code below is unchanged from index.html.
+  // ==========================================================================
+
+  function readStore() {
+    let raw = null;
+    try { raw = localStorage.getItem(STORE_KEY); } catch (e) { return null; }
+    if (raw === null) return null;              // never initialised
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      // Every row gets a valid status on the way in. Records saved before the
+      // status field existed come back as Active here, which is how existing
+      // subscriptions acquire a status: no migration step, no prompt, and
+      // nothing in storage is rewritten just by reading it.
+      return parsed.map((r) =>
+        Object.assign({}, r, { status: normalizeStatus(r && r.status) }));
+    } catch (e) {
+      return [];                                 // corrupt: treat as empty
+    }
+  }
+
+  function writeStore(rows) {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(rows));
+      return true;
+    } catch (e) {
+      // Private browsing or a full quota. Say so rather than pretending the
+      // save worked, which is the one behaviour that would embarrass the demo.
+      showAppError("Couldn't save to this browser's storage. Your changes are on screen but won't survive a reload.");
+      return false;
+    }
+  }
+
+  async function loadSubs() {
+    const rows = readStore();
+    subs = rows === null ? [] : rows;
+    render();
+    return true;
+  }
+
+  // Mirrors withSave() in the real app: show progress, write, re-read, report.
+  async function withSave(label, mutate) {
+    setStatus("busy", label);
+    if (SAVE_DELAY_MS) await sleep(SAVE_DELAY_MS);
+
+    const current = readStore() || [];
+    const next = mutate(current);
+
+    if (next === null) {
+      setStatus("err", "Not saved");
+      showAppError("That change didn't apply. Reload the page and try again.");
+      await loadSubs();
+      return false;
+    }
+
+    const ok = writeStore(next);
+    await loadSubs();
+    if (ok) { clearAppError(); setStatus("ok", "Saved"); }
+    else { setStatus("err", "Not saved"); }
+    return ok;
+  }
+
+  function insertSub(record) {
+    return withSave("Saving…", (rows) => {
+      const row = Object.assign(
+        { id: newId(), created_at: new Date().toISOString(), status: DEFAULT_STATUS },
+        record);
+      row.status = normalizeStatus(row.status);
+      return rows.concat([row]);
+    });
+  }
+
+  // THIS is where the cancelled-is-final rule is enforced.
+  //
+  // Every edit in the app funnels through here on its way to storage, so the
+  // refusal holds no matter what called it: the modal, a future one-click
+  // toggle on the row, or someone poking at __demo in the browser console.
+  // Nothing is written when the transition is refused.
+  async function updateSub(id, record) {
+    const rows = readStore() || [];
+    const existing = rows.filter((r) => r.id === id)[0];
+
+    if (existing && Object.prototype.hasOwnProperty.call(record, "status")) {
+      const verdict = checkStatusChange(existing.status, record.status);
+      if (!verdict.ok) {
+        setStatus("err", "Not saved");
+        showAppError(verdict.reason);
+        await loadSubs();          // put the screen back to what's stored
+        return false;
+      }
+    }
+
+    return withSave("Saving…", (current) => {
+      let found = false;
+      const next = current.map((r) => {
+        if (r.id !== id) return r;
+        found = true;
+        const merged = Object.assign({}, r, record);
+        merged.status = normalizeStatus(merged.status);
+        return merged;
+      });
+      return found ? next : null;
+    });
+  }
+
+  function deleteSub(id) {
+    return withSave("Deleting…", (rows) => {
+      const next = rows.filter((r) => r.id !== id);
+      return next.length === rows.length ? null : next;
+    });
+  }
+
+  // ==========================================================================
+  // SAMPLE DATA
+  //
+  // Written once, the first time this file is opened in a given browser. It is
+  // chosen to make every visual feature visible in the first frame: one item
+  // renewing within two weeks, one marked "Cancel soon" so the red card shows,
+  // and a mix of monthly and yearly so the two totals differ meaningfully.
+  // ==========================================================================
+  function sampleSubs() {
+    return [
+      { name: "Streamly",      cost: 15.99,  billing_period: "monthly", next_renewal: dateOffset(4),   rating: "Love it"     },
+      { name: "FitPulse Gym",  cost: 29.99,  billing_period: "monthly", next_renewal: dateOffset(11),  rating: "Cancel soon" },
+      { name: "NewsDaily",     cost: 8.00,   billing_period: "monthly", next_renewal: dateOffset(19),  rating: "Meh"         },
+      { name: "CloudVault",    cost: 99.00,  billing_period: "yearly",  next_renewal: dateOffset(63),  rating: "Like it"     },
+      { name: "DesignKit Pro", cost: 143.88, billing_period: "yearly",  next_renewal: dateOffset(210), rating: "Love it"     }
+    ].map((s) => Object.assign(
+      { id: newId(), created_at: new Date().toISOString(), status: DEFAULT_STATUS }, s));
+  }
+
+  // Two records planted under the OLD storage key so the import prompt has
+  // something to find. Only ever written when that key is empty, so if you do
+  // have real data from the earlier version, it is left completely alone.
+  function sampleLegacy() {
+    return [
+      { name: "Podcast Plus", cost: 4.99,  frequency: "monthly", renewal: dateOffset(8),  rating: "Like it" },
+      { name: "Recipe Box",   cost: 24.00, frequency: "yearly",  renewal: dateOffset(52), rating: "Meh"     }
+    ];
+  }
+
+  function seedIfNeeded() {
+    if (readStore() === null) writeStore(sampleSubs());
+
+    let legacyRaw = null;
+    try { legacyRaw = localStorage.getItem(LEGACY_KEY); } catch (e) { return; }
+    if (legacyRaw === null) {
+      try { localStorage.setItem(LEGACY_KEY, JSON.stringify(sampleLegacy())); } catch (e) { /* ignore */ }
+    }
+  }
+
+  // ==========================================================================
+  // IMPORT from the old browser-only storage
+  // ==========================================================================
+  function legacyToRow(s) {
+    if (!s || typeof s !== "object") return null;
+
+    const name = String(s.name == null ? "" : s.name).trim().slice(0, 60);
+    if (name === "") return null;
+
+    const renewal = String((s.next_renewal != null ? s.next_renewal : s.renewal) || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(renewal)) return null;
+    if (!Number.isFinite(Date.parse(renewal))) return null;
+
+    let cost = Number(s.cost);
+    if (!Number.isFinite(cost) || cost < 0) cost = 0;
+    cost = Math.min(Math.round(cost * 100) / 100, MAX_COST);
+
+    const period = (s.billing_period != null ? s.billing_period : s.frequency);
+
+    return {
+      name: name,
+      cost: cost,
+      billing_period: period === "yearly" ? "yearly" : "monthly",
+      next_renewal: renewal,
+      rating: RATINGS.indexOf(s.rating) !== -1 ? s.rating : "Like it",
+      // Old browser data predates the status field entirely, so imported rows
+      // arrive Active unless they somehow already carry a valid status.
+      status: normalizeStatus(s.status)
+    };
+  }
+
+  function readLegacyData() {
+    let raw = null;
+    try { raw = localStorage.getItem(LEGACY_KEY); } catch (e) { return []; }
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map(legacyToRow).filter(Boolean);
+    } catch (e) { return []; }
+  }
+
+  function alreadyOfferedImport() {
+    try { return localStorage.getItem(IMPORT_DONE_KEY) === "yes"; } catch (e) { return true; }
+  }
+  function markImportHandled() {
+    try { localStorage.setItem(IMPORT_DONE_KEY, "yes"); } catch (e) { /* ignore */ }
+  }
+
+  let pendingImport = [];
+
+  function maybeOfferImport() {
+    // The real app only offers this when the account is empty. Here the list
+    // starts with sample data, so that condition is dropped - otherwise the
+    // prompt could never be filmed. "Reset demo" clears the handled flag, so
+    // the prompt comes back for a second take.
+    if (alreadyOfferedImport()) return;
+
+    pendingImport = readLegacyData();
+    if (pendingImport.length === 0) return;
+
+    const n = pendingImport.length;
+    importBody.textContent =
+      "This browser has " + n + (n === 1 ? " subscription" : " subscriptions") +
+      " saved from before you had an account. Copy them into your account now? " +
+      "Your browser copy is kept either way, so nothing can be lost here.";
+    importBackdrop.classList.add("open");
+  }
+
+  function closeImport() {
+    importBackdrop.classList.remove("open");
+  }
+
+  importSkipBtn.addEventListener("click", () => {
+    markImportHandled();
+    closeImport();
+  });
+
+  importDoBtn.addEventListener("click", async () => {
+    importDoBtn.disabled = true;
+    importSkipBtn.disabled = true;
+
+    setStatus("busy", "Importing…");
+    if (SAVE_DELAY_MS) await sleep(SAVE_DELAY_MS);
+
+    const rows = pendingImport.map((r) =>
+      Object.assign({ id: newId(), created_at: new Date().toISOString(), status: DEFAULT_STATUS }, r));
+
+    const current = readStore() || [];
+    const ok = writeStore(current.concat(rows));
+
+    importDoBtn.disabled = false;
+    importSkipBtn.disabled = false;
+    closeImport();
+    markImportHandled();
+
+    await loadSubs();
+    setStatus(ok ? "ok" : "err", ok ? "Imported" : "Import failed");
+  });
+
+  // ==========================================================================
+  // RENDERING (unchanged from the real app)
+  // ==========================================================================
+  function render() {
+    // Cancelled subscriptions are no longer being paid for, so they drop out
+    // of the totals. The per-subscription maths is untouched: same
+    // monthlyEquivalent, same yearly = monthly x 12. Only which rows go into
+    // the sum has changed.
+    const monthlyTotal = subs
+      .filter((s) => !isCancelled(s))
+      .reduce((acc, s) => acc + monthlyEquivalent(s), 0);
+    totalMonthlyEl.textContent = money(monthlyTotal);
+    totalYearlyEl.textContent = money(monthlyTotal * 12);
+
+    countEl.textContent = subs.length + (subs.length === 1 ? " subscription" : " subscriptions");
+
+    // Active first, most expensive per month at the top as before, then the
+    // cancelled ones below in the same order. Keeps the list you can actually
+    // act on at the top rather than letting a dead $99/mo entry lead.
+    const sorted = subs.slice().sort((a, b) => {
+      const rank = Number(isCancelled(a)) - Number(isCancelled(b));
+      if (rank !== 0) return rank;
+      return monthlyEquivalent(b) - monthlyEquivalent(a);
+    });
+
+    if (sorted.length === 0) {
+      listEl.innerHTML = '<div class="empty">No subscriptions yet. Click &ldquo;Add subscription&rdquo; to get started.</div>';
+      return;
+    }
+
+    listEl.innerHTML = "";
+    sorted.forEach((s) => {
+      const days = daysUntil(s.next_renewal);
+      const soon = days >= 0 && days <= 14;
+      const past = days < 0;
+      const isCancel = s.rating === "Cancel soon";
+      const cancelled = isCancelled(s);
+
+      const card = document.createElement("div");
+      // The red "Cancel soon" treatment is suppressed once a subscription is
+      // actually cancelled, so the two never fight for the same row.
+      card.className = "card" +
+        (isCancel && !cancelled ? " cancel" : "") +
+        (cancelled ? " is-cancelled" : "");
+
+      const perLabel = s.billing_period === "yearly" ? "/year" : "/month";
+
+      // No countdown for something that isn't renewing.
+      let timingBadge = "";
+      if (cancelled) {
+        timingBadge = "";
+      } else if (days === 0) {
+        timingBadge = '<span class="badge soon">Renews today</span>';
+      } else if (soon) {
+        timingBadge = '<span class="badge soon">Renews in ' + days + (days === 1 ? " day" : " days") + "</span>";
+      } else if (past) {
+        timingBadge = '<span class="badge past">Renewal date has passed</span>';
+      }
+
+      const ratingBadge =
+        '<span class="badge rating' + (isCancel ? " cancel" : "") + '">' + escapeHtml(s.rating) + "</span>";
+
+      const statusBadge =
+        '<span class="badge ' + (cancelled ? "state-cancelled" : "state-active") + '">' +
+        (cancelled ? "Cancelled" : "Active") + "</span>";
+
+      // The date is kept either way, but the wording stops claiming a
+      // cancelled subscription is going to renew.
+      const dateLine = cancelled
+        ? "Was renewing " + formatDate(s.next_renewal)
+        : "Renews " + formatDate(s.next_renewal);
+
+      card.innerHTML =
+        '<div class="left">' +
+          '<div class="name">' + escapeHtml(s.name) + "</div>" +
+          '<div class="meta">' + dateLine + "</div>" +
+          '<div class="badges">' + statusBadge + ratingBadge + timingBadge + "</div>" +
+        "</div>" +
+        '<div class="right">' +
+          '<div class="cost">' + money(s.cost) + '<span class="per"> ' + perLabel + "</span></div>" +
+          '<div class="row-actions">' +
+            '<button class="ghost small" data-edit="' + escapeHtml(s.id) + '">Edit</button>' +
+            '<button class="ghost small" data-delete="' + escapeHtml(s.id) + '">Delete</button>' +
+          "</div>" +
+        "</div>";
+
+      listEl.appendChild(card);
+    });
+  }
+
+  // ==========================================================================
+  // ADD / EDIT MODAL (unchanged)
+  // ==========================================================================
+  function showBlocked(message) {
+    statusBlockedEl.textContent = message;
+    show(statusBlockedEl);
+  }
+  function clearBlocked() {
+    hide(statusBlockedEl);
+  }
+
+  function openModal(sub) {
+    clearErrors();
+    clearBlocked();
+    if (sub) {
+      modalTitle.textContent = "Edit subscription";
+      editIdField.value = sub.id;
+      nameEl.value = sub.name;
+      costEl.value = sub.cost;
+      freqEl.value = sub.billing_period;
+      renewalEl.value = sub.next_renewal;
+      ratingEl.value = sub.rating;
+      // Must reflect the stored status, otherwise every ordinary edit of a
+      // cancelled subscription would look like an attempt to reactivate it
+      // and get refused.
+      statusSelectEl.value = normalizeStatus(sub.status);
+    } else {
+      modalTitle.textContent = "Add subscription";
+      form.reset();
+      editIdField.value = "";
+      freqEl.value = "monthly";
+      ratingEl.value = "Love it";
+      statusSelectEl.value = DEFAULT_STATUS;
+    }
+    backdrop.classList.add("open");
+    nameEl.focus();
+  }
+
+  function closeModal() {
+    backdrop.classList.remove("open");
+  }
+
+  function clearErrors() {
+    ["f-name", "f-cost", "f-date"].forEach((id) => $(id).classList.remove("invalid"));
+  }
+
+  function validate() {
+    clearErrors();
+    let ok = true;
+    if (nameEl.value.trim() === "") {
+      $("f-name").classList.add("invalid"); ok = false;
+    }
+    const costVal = parseFloat(costEl.value);
+    if (!Number.isFinite(costVal) || costVal < 0 || costVal > MAX_COST) {
+      $("f-cost").classList.add("invalid"); ok = false;
+    }
+    if (renewalEl.value === "") {
+      $("f-date").classList.add("invalid"); ok = false;
+    }
+    return ok;
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    clearBlocked();
+    if (!validate()) return;
+
+    const record = {
+      name: nameEl.value.trim(),
+      cost: Math.round(parseFloat(costEl.value) * 100) / 100,
+      billing_period: freqEl.value,
+      next_renewal: renewalEl.value,
+      rating: ratingEl.value,
+      status: normalizeStatus(statusSelectEl.value)
+    };
+
+    const id = editIdField.value;
+
+    // Same rule, checked early purely so the message lands next to the control
+    // that caused it and the modal stays open with your other edits intact.
+    // updateSub checks again and is the one that actually refuses the write.
+    if (id) {
+      const existing = subs.filter((s) => s.id === id)[0];
+      const verdict = checkStatusChange(existing ? existing.status : DEFAULT_STATUS, record.status);
+      if (!verdict.ok) {
+        showBlocked(verdict.reason);
+        statusSelectEl.focus();
+        return;
+      }
+    }
+
+    saveBtn.disabled = true;
+    closeModal();
+    if (id) {
+      await updateSub(id, record);
+    } else {
+      await insertSub(record);
+    }
+    saveBtn.disabled = false;
+  });
+
+  // ==========================================================================
+  // EVENTS
+  // ==========================================================================
+  addBtn.addEventListener("click", () => openModal(null));
+  $("cancelBtn").addEventListener("click", closeModal);
+
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) closeModal();
+  });
+
+  importBackdrop.addEventListener("click", (e) => {
+    if (e.target === importBackdrop) { markImportHandled(); closeImport(); }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (backdrop.classList.contains("open")) closeModal();
+    else if (importBackdrop.classList.contains("open")) { markImportHandled(); closeImport(); }
+  });
+
+  listEl.addEventListener("click", async (e) => {
+    const editId = e.target.getAttribute("data-edit");
+    const deleteId = e.target.getAttribute("data-delete");
+
+    if (editId) {
+      const sub = subs.find((s) => s.id === editId);
+      if (sub) openModal(sub);
+    } else if (deleteId) {
+      const target = subs.find((s) => s.id === deleteId);
+      const label = target ? target.name : "this subscription";
+      if (window.confirm('Delete "' + label + '"?')) {
+        await deleteSub(deleteId);
+      }
+    }
+  });
+
+  // Takes the demo back to the exact starting state: sample list restored and
+  // the import prompt armed again. Handy between takes.
+  resetBtn.addEventListener("click", async () => {
+    if (!window.confirm("Reset the demo? This restores the sample subscriptions and re-arms the import prompt.")) return;
+    try {
+      localStorage.removeItem(STORE_KEY);
+      localStorage.removeItem(IMPORT_DONE_KEY);
+    } catch (e) { /* ignore */ }
+    clearAppError();
+    seedIfNeeded();
+    await loadSubs();
+    setStatus("ok", "Reset");
+    setTimeout(maybeOfferImport, 400);
+  });
+
+  // ==========================================================================
+  // START
+  // ==========================================================================
+  // Test and demo hook. Lets the rule be exercised with the interface out of
+  // the picture entirely, which is the point: the refusal lives in updateSub,
+  // not in the dropdown. In the browser console, try
+  //   __demo.updateSub(__demo.subs().find(s => s.status === "Cancelled").id, { status: "Active" })
+  // and watch it refuse.
+  window.__demo = {
+    checkStatusChange: checkStatusChange,
+    normalizeStatus: normalizeStatus,
+    updateSub: updateSub,
+    insertSub: insertSub,
+    deleteSub: deleteSub,
+    readStore: readStore,
+    subs: () => subs.slice()
+  };
+
+  userEmailEl.textContent = DEMO_USER.email;
+  seedIfNeeded();
+  loadSubs().then(maybeOfferImport);
+})();
+</script>
+</body>
+</html>
