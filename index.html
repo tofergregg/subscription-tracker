@@ -561,6 +561,36 @@ function escapeHtml(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// ---------------------------------------------------------------------------
+// Module 3. READING THE ACTUAL ERROR OUT OF AN EDGE FUNCTION
+//
+// When a function answers with anything other than success, the Supabase
+// client hands you "Edge Function returned a non-2xx status code" and nothing
+// else. That sentence tells you only that something went wrong, which you
+// already knew.
+//
+// The useful part is still there. The client parks the raw response on
+// error.context, and our functions always answer with JSON explaining
+// themselves: a missing key, a rejected model name, whatever it was. So dig
+// it out and show it.
+//
+// Worth internalizing generally: when an error message is a dead end, the
+// first question is whether the real one is being swallowed somewhere.
+// ---------------------------------------------------------------------------
+async function functionError(error) {
+  try {
+    if (error && error.context && typeof error.context.json === "function") {
+      const body = await error.context.json();
+      if (body && body.error) {
+        return body.error + (body.detail ? " (" + body.detail + ")" : "");
+      }
+    }
+  } catch {
+    // The body was not JSON, or was already read. Fall through.
+  }
+  return error && error.message ? error.message : "Unknown error.";
+}
+
 // The save-status pill. Writes can now fail in ways localStorage never did,
 // so the app should always be visibly honest about what it managed to save.
 let statusTimer = null;
@@ -1281,7 +1311,7 @@ async function notifyCancellation(record) {
     setStatus("err", "Email not sent");
     showAppError(
       "The cancellation saved fine, but the confirmation email didn't send: " +
-      error.message + " Check that RESEND_API_KEY is set on the project."
+      await functionError(error)
     );
     return;
   }
@@ -1340,7 +1370,7 @@ async function summarize() {
 
   if (error) {
     aiBody.innerHTML = '<p class="failed">' +
-      escapeHtml("The summary didn't run: " + error.message) + "</p>";
+      escapeHtml("The summary didn't run: " + await functionError(error)) + "</p>";
     return;
   }
   if (data && data.error) {
@@ -1371,7 +1401,7 @@ async function sendReminders() {
 
   if (error) {
     setStatus("err", "Not sent");
-    showAppError("Reminders didn't send: " + error.message);
+    showAppError("Reminders didn't send: " + await functionError(error));
     return;
   }
   if (data && data.error) {
