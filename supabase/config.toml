@@ -15,3 +15,6 @@ verify_jwt = true
 
 [functions.summarize-subscriptions]
 verify_jwt = true
+
+[functions.send-renewal-reminder]
+verify_jwt = true

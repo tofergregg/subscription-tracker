@@ -138,3 +138,109 @@ developer console (Cmd-Option-J in Chrome) and send me what it says in red.
 
 **Anything else** — the console is the first place to look, and its output is
 usually enough for me to identify the problem.
+
+---
+
+# Modules 3, 4 and 5: the backend half
+
+Everything above got the app storing data. This section adds the three things
+that run on a server rather than in your browser: the cancellation email, the
+AI summary, and the renewal reminders.
+
+Do these in order. Steps 1 and 2 take about ten minutes and are one-time
+account setup. Steps 3 to 6 are the ones you will repeat whenever a function
+changes.
+
+## Step 1: Run the Module 3 migration
+
+Supabase dashboard -> SQL Editor -> New query. Paste `schema-module3-status.sql`
+and Run. It adds the `status` column, sets every existing subscription to
+Active, and adds an index that Modules 6 and 7 rely on.
+
+Safe to run on live data: it is additive and wrapped in a transaction.
+
+## Step 2: Get the two keys
+
+**Resend**, for email. Sign up at resend.com on the free tier and create an API
+key. You do **not** need a domain. The functions send from Resend's shared
+`onboarding@resend.dev` address, which can only deliver to the address you
+signed up with. That is exactly right for a course app and it is why nobody
+following along has to buy anything.
+
+**Anthropic**, for the AI summary. Create an API key at console.anthropic.com.
+
+Neither key goes anywhere near `index.html`. That is the entire point of the
+next three steps.
+
+## Step 3: Install and link the Supabase CLI
+
+```
+brew install supabase/tap/supabase
+supabase login
+supabase link --project-ref rjmgqrnkuooqqitwbbrz
+```
+
+Run these from this folder. `link` is what connects the `supabase/` directory
+here to the project in the dashboard.
+
+## Step 4: Store the keys as secrets
+
+```
+supabase secrets set RESEND_API_KEY=re_your_key_here
+supabase secrets set ANTHROPIC_API_KEY=sk-ant-your_key_here
+```
+
+These live on Supabase's servers. They are not in this repository, they are not
+in the deployed page, and `supabase secrets list` shows you the names without
+the values. Confirm with that command before moving on.
+
+## Step 5: Deploy the functions
+
+```
+supabase functions deploy
+```
+
+That deploys all three at once. To do one at a time:
+
+```
+supabase functions deploy notify-cancellation
+supabase functions deploy summarize-subscriptions
+supabase functions deploy send-renewal-reminder
+```
+
+## Step 6: Prove each one works
+
+**Cancellation email.** Edit any subscription, set Status to Cancelled, save.
+The row greys out, the countdown disappears, and an email arrives. Then edit it
+again and try to set it back to Active: the app should refuse, in words,
+without saving anything.
+
+**AI summary.** Click Summarize. Three or four bullets appear, the first naming
+your monthly total.
+
+**Renewal reminders.** Set one subscription's renewal date to tomorrow, then
+click Email reminders. One email arrives and the pill reads "1 reminder sent".
+If nothing is due it says "Nothing due", which is correct behavior, not a
+failure.
+
+## Things that will confuse you later
+
+**A function call fails with nothing in the logs.** That is almost always CORS,
+which means the browser blocked the response before your code ever saw it.
+Check `supabase/functions/_shared/cors.ts` is imported and that the function
+answers the `OPTIONS` request.
+
+**The AI summary returns a model error.** Model names get retired. Do not edit
+the function; set a current one as a secret instead:
+
+```
+supabase secrets set CLAUDE_MODEL=<current-model-id>
+```
+
+**Email stops arriving after a burst.** The Resend free tier is rate limited.
+Fine for one person testing. It is also why Module 6 builds a runs log: once
+this is on a schedule, you need to see the failures you are no longer present
+for.
+
+**Changing a secret does not need a redeploy.** Functions read secrets at run
+time. Changing a key takes effect on the next call.

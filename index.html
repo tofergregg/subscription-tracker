@@ -307,6 +307,7 @@
       <span class="status hidden" id="status"></span>
     </div>
     <div class="toolbar-right">
+      <button class="ghost" id="remindBtn">Email reminders</button>
       <button class="ghost" id="summarizeBtn">Summarize</button>
       <button class="primary" id="addBtn">+ Add subscription</button>
     </div>
@@ -500,6 +501,7 @@ const subStatusEl= $("substatus");   // Module 3
 const saveBtn    = $("saveBtn");
 const addBtn     = $("addBtn");
 const summarizeBtn = $("summarizeBtn");   // Module 4
+const remindBtn    = $("remindBtn");      // Module 5
 const aiPanel      = $("aiPanel");
 const aiBody       = $("aiBody");
 const aiDismiss    = $("aiDismiss");
@@ -728,6 +730,7 @@ async function startSession() {
 
   addBtn.disabled = false;
   summarizeBtn.disabled = false;
+  remindBtn.disabled = false;
   setStatus(null);
   maybeOfferImport();
 }
@@ -1333,9 +1336,44 @@ async function summarize() {
 }
 
 // ---------------------------------------------------------------------------
+// Module 5. EMAIL ME WHAT IS COMING UP
+//
+// A person clicks, the app asks the server, the server sends the mail. The
+// interesting thing about this button is how ordinary it is, and how much of
+// the work is already somewhere else: the edge function does the finding and
+// the sending, and this end of it does nothing but ask.
+//
+// Keep that in mind in Module 6. Replacing this click with a schedule does not
+// require rewriting any of the part that matters.
+// ---------------------------------------------------------------------------
+async function sendReminders() {
+  remindBtn.disabled = true;
+  setStatus("busy", "Checking renewals…");
+
+  const { data, error } = await supabase.functions.invoke("send-renewal-reminder");
+  remindBtn.disabled = false;
+
+  if (error) {
+    setStatus("err", "Not sent");
+    showAppError("Reminders didn't send: " + error.message);
+    return;
+  }
+  if (data && data.error) {
+    setStatus("err", "Not sent");
+    showAppError(data.error);
+    return;
+  }
+
+  clearAppError();
+  const n = data && typeof data.sent === "number" ? data.sent : 0;
+  setStatus("ok", n === 0 ? "Nothing due" : n === 1 ? "1 reminder sent" : n + " reminders sent");
+}
+
+// ---------------------------------------------------------------------------
 // EVENTS
 // ---------------------------------------------------------------------------
 addBtn.addEventListener("click", () => openModal(null));
+remindBtn.addEventListener("click", sendReminders);
 summarizeBtn.addEventListener("click", summarize);
 aiDismiss.addEventListener("click", () => hide(aiPanel));
 $("cancelBtn").addEventListener("click", closeModal);
