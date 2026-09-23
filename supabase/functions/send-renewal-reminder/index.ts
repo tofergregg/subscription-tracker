@@ -13,7 +13,13 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
-import { findDue, logRun, sendReminder, serviceClient } from "../_shared/reminders.ts";
+import {
+  findDue,
+  logRun,
+  sendFailureAlert,
+  sendReminder,
+  serviceClient,
+} from "../_shared/reminders.ts";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -24,6 +30,7 @@ Deno.serve(async (req: Request) => {
   // from the browser at all, by design: a page cannot forge a clean history.
   const log = serviceClient();
   let householdId: string | null = null;
+  let userEmail: string | null = null;
   let sent = 0;
 
   try {
@@ -38,6 +45,7 @@ Deno.serve(async (req: Request) => {
     if (userError || !user?.email) {
       return jsonResponse({ error: "Not signed in." }, 401);
     }
+    userEmail = user.email;
 
     const { data: membership } = await supabase
       .from("household_members")
@@ -91,6 +99,12 @@ Deno.serve(async (req: Request) => {
       succeeded: false,
       error: String(err),
     });
+    await sendFailureAlert(
+      Deno.env.get("RESEND_API_KEY"),
+      userEmail,
+      "manual",
+      String(err),
+    );
     return jsonResponse({ error: String(err), sent }, 502);
   }
 });

@@ -159,3 +159,56 @@ export function serviceClient(): SupabaseClient {
     { auth: { persistSession: false } },
   );
 }
+
+// ---------------------------------------------------------------------------
+// Module 6, video 6.4: the failure alert
+//
+// A log you have to remember to open is a log you will not open. The runs
+// table makes a failure VISIBLE; this makes it come and find you.
+//
+// Note who it goes to. Not the person who was expecting a renewal reminder,
+// who can do nothing about a broken workflow, but whoever maintains the
+// automation. Set ALERT_EMAIL to that address. Without it we fall back to the
+// affected user, which is better than telling nobody.
+//
+// This deliberately never throws. An alert that fails must not become the
+// reason a run is recorded as broken, and it must never mask the original
+// problem, which is the thing actually worth knowing about.
+// ---------------------------------------------------------------------------
+export async function sendFailureAlert(
+  apiKey: string | undefined,
+  fallbackTo: string | null,
+  triggerSource: "manual" | "schedule",
+  error: string,
+): Promise<void> {
+  const to = Deno.env.get("ALERT_EMAIL") ?? fallbackTo;
+  if (!apiKey || !to) {
+    console.error("No way to send a failure alert. Set ALERT_EMAIL.");
+    return;
+  }
+
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: FROM,
+        to: [to],
+        subject: "Subscription Tracker: renewal reminders FAILED",
+        text:
+          `A renewal reminder run failed.\n\n` +
+          `Triggered by: ${triggerSource}\n` +
+          `When: ${new Date().toISOString()}\n\n` +
+          `What the service said:\n${error}\n\n` +
+          `The run is recorded in the workflow_runs table. Check there first ` +
+          `to see whether this is the only failure or the latest of several, ` +
+          `then check the function logs in Supabase for the detail.\n`,
+      }),
+    });
+  } catch (err) {
+    console.error("The failure alert itself failed to send:", err);
+  }
+}

@@ -270,3 +270,103 @@ for.
 
 **Changing a secret does not need a redeploy.** Functions read secrets at run
 time. Changing a key takes effect on the next call.
+
+---
+
+# Module 6: automation and monitoring
+
+The app has run on demand until now. This section makes it run on its own, and
+gives you a way to find out when it does not.
+
+## Step 1: Run the migration
+
+Supabase SQL Editor, paste `schema-module6-automation.sql`, Run. Sections 1 and
+2 only. Section 3 is commented out on purpose and needs a value from you first.
+
+That adds the `workflow_runs` table and the `last_reminded_for` column.
+
+## Step 2: Make a cron secret and set the alert address
+
+The scheduled function cannot check a signed-in session, because a schedule is
+not a person. It checks a shared secret instead.
+
+```
+openssl rand -hex 32
+```
+
+Keep that string. Then:
+
+```
+supabase secrets set CRON_SECRET=paste_the_string_here
+supabase secrets set ALERT_EMAIL=you@example.com
+```
+
+`ALERT_EMAIL` is where failure alerts go. Note that this is deliberately the
+person who maintains the automation, not the person waiting on a reminder. A
+user who does not get their reminder email cannot fix a broken workflow.
+
+## Step 3: Deploy
+
+```
+supabase functions deploy
+```
+
+That picks up the new `scheduled-reminders` function and the changes to
+`send-renewal-reminder`.
+
+## Step 4: Turn on the schedule
+
+Back in the SQL Editor, uncomment section 3 of the migration, paste the same
+random string into the `vault.create_secret` line, and run it.
+
+The secret goes into Supabase Vault rather than straight into the cron job
+because a job definition is plain text that anyone able to list your jobs can
+read. Same principle as the Resend key in Module 3: credentials live somewhere
+built to hold them, and whatever needs one fetches it at the moment of use.
+
+## Step 5: Prove it
+
+**The manual path still works.** Set a renewal date to tomorrow and click Email
+reminders. One email, and a new row in `workflow_runs` with `trigger_source`
+of `manual`.
+
+**It does not repeat.** Click it again straight away. No second email, and a
+row showing zero reminders sent. That is `last_reminded_for` doing its job.
+
+**The scheduled path works.** Rather than waiting until morning, call it
+yourself:
+
+```
+curl -X POST https://rjmgqrnkuooqqitwbbrz.supabase.co/functions/v1/scheduled-reminders \
+  -H "x-cron-secret: your_cron_secret"
+```
+
+Set another renewal to tomorrow first, or there will be nothing due. Expect a
+row with `trigger_source` of `schedule`.
+
+**The secret actually protects it.** Run the same curl with a wrong secret.
+Expect `Not authorized.` and no row at all.
+
+**A failure is visible.** Change `RESEND_API_KEY` to an obviously invalid value,
+run the job, and check three things: a failed row in `workflow_runs` with the
+error text, an alert email at your `ALERT_EMAIL`, and the detail in
+`supabase functions logs send-renewal-reminder`. Then put the real key back.
+
+That last one is the whole point of the module. Do it once deliberately, in
+daylight, so that the first time you see a failed row is not at eight in the
+morning on a day something matters.
+
+## Things that will confuse you later
+
+**`cron.job_run_details` and `workflow_runs` answer different questions.** The
+first says whether the database managed to make the HTTP call. The second says
+whether the work succeeded. A job can fire perfectly and still fail entirely.
+
+**Nothing arrives and there is no row either.** The schedule never fired. Check
+`select * from cron.job` and confirm the job exists and is active.
+
+**A row exists saying zero sent.** The job ran and found nothing due. Usually
+correct. Check `last_reminded_for` against `next_renewal` before assuming a bug.
+
+**Turning it off.** `select cron.unschedule('daily-renewal-reminders');`
+Worth knowing before you need it in a hurry.

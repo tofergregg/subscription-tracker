@@ -23,7 +23,13 @@
 // ============================================================================
 
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
-import { findDue, logRun, sendReminder, serviceClient } from "../_shared/reminders.ts";
+import {
+  findDue,
+  logRun,
+  sendFailureAlert,
+  sendReminder,
+  serviceClient,
+} from "../_shared/reminders.ts";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -107,6 +113,12 @@ Deno.serve(async (req: Request) => {
           succeeded: false,
           error: String(err),
         });
+        await sendFailureAlert(
+          Deno.env.get("RESEND_API_KEY"),
+          null,
+          "schedule",
+          String(err),
+        );
       }
     }
 
@@ -126,6 +138,12 @@ Deno.serve(async (req: Request) => {
       succeeded: false,
       error: String(err),
     });
+    await sendFailureAlert(
+      Deno.env.get("RESEND_API_KEY"),
+      null,
+      "schedule",
+      String(err),
+    );
     return jsonResponse({ error: String(err), sent: totalSent }, 500);
   }
 });
