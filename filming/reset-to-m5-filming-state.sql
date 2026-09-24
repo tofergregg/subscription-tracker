@@ -24,6 +24,11 @@ exception
     raise notice 'No schedule to remove, which is fine.';
 end $$;
 
+-- Remove the cron secret from the vault as well. Video 6.3 creates it on
+-- camera, so it must not already be there, or you are filming yourself adding
+-- something the dashboard already lists.
+delete from vault.secrets where name = 'cron_secret';
+
 -- ----------------------------------------------------------------------------
 -- 2. Remove the Module 6 objects
 --
@@ -72,6 +77,25 @@ update public.subscriptions
    set next_renewal = current_date + 25
  where name <> 'FitTrack+'
    and next_renewal < current_date + 8;
+
+-- ----------------------------------------------------------------------------
+-- NOT DONE HERE: two dashboard secrets
+--
+-- SQL cannot reach the Edge Function secrets, so these two have to go by hand,
+-- under Dashboard -> Edge Functions -> Secrets. The videos create them on
+-- camera, and the Custom secrets panel lists every key by name, so one sitting
+-- there beforehand contradicts the take:
+--
+--   CRON_SECRET    created during video 6.3
+--   ALERT_EMAIL    created during video 6.4
+--
+-- Leave RESEND_API_KEY, ANTHROPIC_API_KEY, AI_GATEWAY_URL and CLAUDE_MODEL
+-- alone. Those exist by Module 5 and belong on screen.
+--
+-- Note also that the secrets panel shows a truncated prefix of every value with
+-- no way to hide it. Use a throwaway Resend key for the shoot and delete it
+-- afterwards.
+-- ----------------------------------------------------------------------------
 
 -- ----------------------------------------------------------------------------
 -- 5. Confirm where you are
