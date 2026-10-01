@@ -16,5 +16,11 @@ verify_jwt = true
 [functions.summarize-subscriptions]
 verify_jwt = true
 
+# Module 6: the one exception. The daily schedule calls this function with no
+# signed-in session, so Supabase's built-in session check would reject it
+# before it starts. The function does its own check instead, as its very
+# first step: either a valid signed-in session (the button) or the shared
+# secret from Vault (the schedule). Anything else gets a 401 before any data
+# is read or any email is sent.
 [functions.send-renewal-reminder]
-verify_jwt = true
+verify_jwt = false
