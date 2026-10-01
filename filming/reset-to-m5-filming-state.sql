@@ -24,21 +24,34 @@ exception
     raise notice 'No schedule to remove, which is fine.';
 end $$;
 
--- Remove the cron secret from the vault as well. Video 6.3 creates it on
--- camera, so it must not already be there, or you are filming yourself adding
--- something the dashboard already lists.
-delete from vault.secrets where name = 'cron_secret';
-
 -- ----------------------------------------------------------------------------
 -- 2. Remove the Module 6 objects
 --
--- Dropping workflow_runs throws away your rehearsal run history, which is the
--- point: 6.3 has to open with no runs log in existence.
+-- These are the objects the filmed 6.3 and 6.4 takes actually created
+-- (schema-module6-scheduled-reminders.sql and schema-module6b-alert-status.sql
+-- at tag m6-end). Dropping the tables throws away your rehearsal run history,
+-- which is the point: 6.3 has to open with no runs log in existence.
 -- ----------------------------------------------------------------------------
-drop table if exists public.workflow_runs;
 
-alter table public.subscriptions
-  drop column if exists last_reminded_for;
+-- 6.4: the trigger that locks finished runs, and its function.
+drop trigger if exists reminder_runs_lock_original on public.reminder_runs;
+drop function if exists public.reminder_runs_lock_original();
+
+-- 6.3: the helper functions, then the two tables.
+drop function if exists public.reminder_recipients(uuid[]);
+drop function if exists public.reminder_cron_secret_ok(text);
+drop table if exists public.reminders_sent;
+drop table if exists public.reminder_runs;
+
+-- 6.3: the Vault entries the schedule reads. The video creates the cron
+-- secret on camera, so it must not already be listed. project_url is
+-- recreated by the same build.
+delete from vault.secrets where name in ('reminder_cron_secret', 'project_url');
+
+-- Older rehearsals used these names. Harmless if they never existed.
+delete from vault.secrets where name = 'cron_secret';
+drop table if exists public.workflow_runs;
+alter table public.subscriptions drop column if exists last_reminded_for;
 
 -- ----------------------------------------------------------------------------
 -- 3. Put the data back to a filmable state
@@ -79,15 +92,24 @@ update public.subscriptions
    and next_renewal < current_date + 8;
 
 -- ----------------------------------------------------------------------------
--- NOT DONE HERE: two dashboard secrets
+-- NOT DONE HERE: the deployed function, and the dashboard secrets
 --
--- SQL cannot reach the Edge Function secrets, so these two have to go by hand,
--- under Dashboard -> Edge Functions -> Secrets. The videos create them on
--- camera, and the Custom secrets panel lists every key by name, so one sitting
--- there beforehand contradicts the take:
+-- The function. A checkout does not change what is running on the server.
+-- From a checkout of m5-end, run:
 --
---   CRON_SECRET    created during video 6.3
+--   supabase functions deploy send-renewal-reminder
+--
+-- That puts the Module 5 version back, along with verify_jwt = true from that
+-- checkout's config.toml. Skip it and the Email reminders button still runs
+-- the Module 6 code. The other two functions did not change in Module 6.
+--
+-- The secrets. SQL cannot reach the Edge Function secrets, so delete these by
+-- hand under Dashboard -> Edge Functions -> Secrets. The Custom secrets panel
+-- lists every key by name, so one sitting there beforehand contradicts a take:
+--
 --   ALERT_EMAIL    created during video 6.4
+--   CRON_SECRET    only if an older rehearsal created it (the filmed build
+--                  keeps its cron secret in Vault, which section 2 removes)
 --
 -- Leave RESEND_API_KEY, ANTHROPIC_API_KEY, AI_GATEWAY_URL and CLAUDE_MODEL
 -- alone. Those exist by Module 5 and belong on screen.
@@ -100,18 +122,19 @@ update public.subscriptions
 -- ----------------------------------------------------------------------------
 -- 5. Confirm where you are
 --
--- Expect: has_status true, has_runs_log false, has_reminded_column false,
--- due_tomorrow 1.
+-- Expect: has_status true, has_runs_log false, has_sent_log false,
+-- has_schedule false, due_tomorrow 1.
 -- ----------------------------------------------------------------------------
 select
   exists (select 1 from information_schema.columns
            where table_name = 'subscriptions' and column_name = 'status')
     as has_status,
-  to_regclass('public.workflow_runs') is not null
+  to_regclass('public.reminder_runs') is not null
     as has_runs_log,
-  exists (select 1 from information_schema.columns
-           where table_name = 'subscriptions' and column_name = 'last_reminded_for')
-    as has_reminded_column,
+  to_regclass('public.reminders_sent') is not null
+    as has_sent_log,
+  exists (select 1 from cron.job where jobname = 'daily-renewal-reminders')
+    as has_schedule,
   (select count(*) from public.subscriptions
     where status = 'Active' and next_renewal = current_date + 1)
     as due_tomorrow;
