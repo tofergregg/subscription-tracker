@@ -24,8 +24,16 @@
 //   reminder_runs  : one row per run, success or failure.
 //   It never cancels, deletes, or edits a subscription.
 //
+// WHEN A RUN FAILS
+//   After the reminder_runs row is written, an alert email goes to the
+//   address in the ALERT_EMAIL secret: what triggered the run, when, and the
+//   exact error. Whether the alert went out is then saved on that same row
+//   (alert_sent, and alert_error if it did not). The row's original error is
+//   never touched. Alert problems also go to the function logs.
+//
 // SETUP
-//   Uses the same RESEND_API_KEY secret as notify-cancellation. Nothing new.
+//   Uses the same RESEND_API_KEY secret as notify-cancellation.
+//   supabase secrets set ALERT_EMAIL=you@example.com
 //   SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are provided
 //   to every edge function automatically.
 //   supabase functions deploy send-renewal-reminder
@@ -58,7 +66,14 @@ type Sub = {
 
 // Shared counters, so that even if a run crashes halfway, the log can record
 // how many emails had already gone out.
-type Tally = { sent: number; failures: string[]; statuses: number[] };
+//   failures : short "Name: status" lines, returned to the button as before
+//   details  : the full text Resend sent back, for the operator alert only
+type Tally = {
+  sent: number;
+  failures: string[];
+  statuses: number[];
+  details: string[];
+};
 
 function money(n: number): string {
   return "$" + Number(n).toFixed(2);
@@ -84,40 +99,63 @@ function addDays(isoDate: string, days: number): string {
 }
 
 // ----------------------------------------------------------------------------
-// THE EMAIL. The one and only copy. Subject and body are exactly what the
-// button has always sent.
+// THE ONE PLACE THAT TALKS TO RESEND. Both the reminder and the operator
+// alert go through here, so there is still a single copy of the sending code.
 // ----------------------------------------------------------------------------
-async function sendReminderEmail(
-  apiKey: string,
-  to: string[],
-  sub: Sub,
-): Promise<{ ok: true } | { ok: false; status: number }> {
-  const verb = sub.auto_renew === false ? "expires" : "renews";
-  const subject = `${sub.name} ${verb} soon`;
+type SendResult = { ok: true } | { ok: false; status: number; detail: string };
 
+async function postToResend(
+  apiKey: string,
+  message: { to: string[]; subject: string; text: string },
+  signal?: AbortSignal,
+): Promise<SendResult> {
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      from: FROM,
-      to,
-      subject,
-      text:
-        `${sub.name} ${verb} on ${sub.next_renewal}.\n\n` +
-        `Cost: ${money(sub.cost)} per ${sub.billing_period === "yearly" ? "year" : "month"}.\n\n` +
-        (sub.auto_renew === false
-          ? `This one does not renew on its own. If you want to keep it, you have to act.\n`
-          : `This one charges you automatically. If you do not want it, now is the time.\n`),
-    }),
+    body: JSON.stringify({ from: FROM, ...message }),
+    signal,
   });
-
   if (res.ok) return { ok: true };
-  const detail = await res.text();
-  console.error(`Reminder failed for ${sub.name}:`, res.status, detail);
-  return { ok: false, status: res.status };
+  return { ok: false, status: res.status, detail: await res.text() };
+}
+
+// ----------------------------------------------------------------------------
+// THE REMINDER EMAIL. The one and only copy. Subject and body are exactly
+// what the button has always sent.
+// ----------------------------------------------------------------------------
+async function sendReminderEmail(
+  apiKey: string,
+  to: string[],
+  sub: Sub,
+): Promise<SendResult> {
+  const verb = sub.auto_renew === false ? "expires" : "renews";
+  const result = await postToResend(apiKey, {
+    to,
+    subject: `${sub.name} ${verb} soon`,
+    text:
+      `${sub.name} ${verb} on ${sub.next_renewal}.\n\n` +
+      `Cost: ${money(sub.cost)} per ${sub.billing_period === "yearly" ? "year" : "month"}.\n\n` +
+      (sub.auto_renew === false
+        ? `This one does not renew on its own. If you want to keep it, you have to act.\n`
+        : `This one charges you automatically. If you do not want it, now is the time.\n`),
+  });
+  if (!result.ok) {
+    console.error(`Reminder failed for ${sub.name}:`, result.status, result.detail);
+  }
+  return result;
+}
+
+// Record a failed send in the tally: a short line for the button, and the
+// full Resend response for the operator alert.
+function recordFailure(tally: Tally, sub: Sub, result: { status: number; detail: string }) {
+  tally.failures.push(`${sub.name}: ${result.status}`);
+  tally.statuses.push(result.status);
+  tally.details.push(
+    `${sub.name} (renewal ${sub.next_renewal}): Resend returned HTTP ${result.status}: ${result.detail}`,
+  );
 }
 
 // Record that this renewal has been covered. Called ONLY after Resend accepts
@@ -177,8 +215,7 @@ async function runManual(
       tally.sent++;
       await markSent(admin, sub);
     } else {
-      tally.failures.push(`${sub.name}: ${result.status}`);
-      tally.statuses.push(result.status);
+      recordFailure(tally, sub, result);
     }
   }
 }
@@ -242,6 +279,9 @@ async function runScheduled(
     if (to.length === 0) {
       // Not marked, so it is retried tomorrow rather than silently dropped.
       tally.failures.push(`${sub.name}: no recipients`);
+      tally.details.push(
+        `${sub.name} (renewal ${sub.next_renewal}): household ${sub.household_id} has no member with an email address, so nothing was sent.`,
+      );
       continue;
     }
     const result = await sendReminderEmail(apiKey, to, sub);
@@ -249,8 +289,7 @@ async function runScheduled(
       tally.sent++;
       await markSent(admin, sub);
     } else {
-      tally.failures.push(`${sub.name}: ${result.status}`);
-      tally.statuses.push(result.status);
+      recordFailure(tally, sub, result);
     }
   }
 }
@@ -262,21 +301,127 @@ async function runScheduled(
 // The error text never includes subscription names, because every signed-in
 // user can read this table and a scheduled run covers every household.
 // ----------------------------------------------------------------------------
+type RunRow = { id: number; ran_at: string };
+
 async function logRun(
   admin: SupabaseClient,
   trigger: Trigger,
   sent: number,
   succeeded: boolean,
   error: string | null,
-): Promise<void> {
-  const { error: insertError } = await admin.from("reminder_runs").insert({
-    trigger,
-    sent,
-    succeeded,
-    error: error ? error.slice(0, 500) : null,
-  });
+): Promise<RunRow | null> {
+  const { data, error: insertError } = await admin
+    .from("reminder_runs")
+    .insert({
+      trigger,
+      sent,
+      succeeded,
+      error: error ? error.slice(0, 500) : null,
+    })
+    .select("id, ran_at")
+    .single();
   if (insertError) {
     console.error("Could not write reminder_runs row:", insertError.message);
+    return null;
+  }
+  return data as RunRow;
+}
+
+// ----------------------------------------------------------------------------
+// OPERATOR ALERT. When a run fails, email the address in the ALERT_EMAIL
+// secret (you), never the people who were expecting reminders.
+//
+// Called only AFTER the reminder_runs row is written, so it cannot change
+// that row's original error. It never throws and never changes the response
+// the caller gets. It returns what happened, which recordAlertOutcome() then
+// saves into the row's two alert columns. Failures are also written to the
+// function logs (Edge Functions -> send-renewal-reminder -> Logs).
+//
+// Unlike the runs log, this email DOES include subscription names and the
+// full text Resend sent back, because only you receive it.
+// ----------------------------------------------------------------------------
+type AlertOutcome = { sent: true } | { sent: false; error: string };
+
+function alertFailed(error: string): AlertOutcome {
+  console.error("Alert not sent:", error);
+  return { sent: false, error };
+}
+
+async function sendFailureAlert(
+  trigger: Trigger,
+  run: RunRow | null,
+  summary: string,
+  details: string[],
+): Promise<AlertOutcome> {
+  try {
+    const to = Deno.env.get("ALERT_EMAIL");
+    if (!to) return alertFailed("The ALERT_EMAIL secret is not set.");
+    const apiKey = Deno.env.get("RESEND_API_KEY");
+    if (!apiKey) return alertFailed("RESEND_API_KEY is not set.");
+
+    const when = run ? new Date(run.ran_at) : new Date();
+    const pacific = when.toLocaleString("en-US", {
+      timeZone: TIME_ZONE,
+      dateStyle: "full",
+      timeStyle: "long",
+    });
+
+    const text =
+      `A renewal reminder run failed.\n\n` +
+      `Triggered by: ${trigger === "schedule" ? "the daily schedule" : "the Email reminders button"} (${trigger})\n` +
+      `When: ${pacific} (${when.toISOString()} UTC)\n` +
+      (run
+        ? `Runs log row: reminder_runs id ${run.id}\n`
+        : `Runs log row: NOT WRITTEN (the log insert failed; see function logs)\n`) +
+      `\nSummary:\n${summary}\n` +
+      (details.length > 0
+        ? `\nWhat the service said:\n${details.map((d) => `- ${d}`).join("\n")}\n`
+        : "");
+
+    const result = await postToResend(
+      apiKey,
+      {
+        to: [to],
+        subject: `Subscription Tracker: reminder run failed (${trigger})`,
+        text,
+      },
+      // A hung alert must not hold up the response.
+      AbortSignal.timeout(10000),
+    );
+    if (!result.ok) {
+      return alertFailed(`Resend returned HTTP ${result.status}: ${result.detail}`);
+    }
+    return { sent: true };
+  } catch (err) {
+    // Network errors and the 10 second timeout land here.
+    const name = err instanceof Error ? err.name : "Error";
+    const message = err instanceof Error ? err.message : String(err);
+    return alertFailed(`${name}: ${message}`);
+  }
+}
+
+// Save the alert's outcome on the run's own row. Only the two alert columns
+// are sent, and the database refuses any change to the original fields
+// anyway (see schema-module6b-alert-status.sql). Never throws.
+async function recordAlertOutcome(
+  admin: SupabaseClient,
+  run: RunRow | null,
+  outcome: AlertOutcome,
+): Promise<void> {
+  if (!run) return; // No row to update; the function logs already say why.
+  try {
+    const { error } = await admin
+      .from("reminder_runs")
+      .update({
+        alert_sent: outcome.sent,
+        alert_error: outcome.sent ? null : outcome.error.slice(0, 500),
+      })
+      .eq("id", run.id);
+    if (error) {
+      console.error(`Could not record alert outcome on run ${run.id}:`, error.message);
+    }
+  } catch (err) {
+    console.error(`Could not record alert outcome on run ${run.id}:`, err);
   }
 }
 
@@ -346,7 +491,7 @@ Deno.serve(async (req: Request) => {
   // --------------------------------------------------------------------------
   // RUN. From here on, every outcome writes exactly one reminder_runs row.
   // --------------------------------------------------------------------------
-  const tally: Tally = { sent: 0, failures: [], statuses: [] };
+  const tally: Tally = { sent: 0, failures: [], statuses: [], details: [] };
   const today = todayInZone();
   const horizon = addDays(today, WINDOW_DAYS);
 
@@ -360,7 +505,10 @@ Deno.serve(async (req: Request) => {
     // A partial failure is a failure. Saying "ok" because four of five went
     // out is how a broken thing keeps looking healthy.
     if (tally.failures.length > 0) {
-      await logRun(admin, trigger, tally.sent, false, failureSummary(tally));
+      const summary = failureSummary(tally);
+      const run = await logRun(admin, trigger, tally.sent, false, summary);
+      const alert = await sendFailureAlert(trigger, run, summary, tally.details);
+      await recordAlertOutcome(admin, run, alert);
       return jsonResponse(
         {
           error: `${tally.failures.length} reminder(s) failed to send.`,
@@ -376,7 +524,19 @@ Deno.serve(async (req: Request) => {
   } catch (err) {
     console.error("send-renewal-reminder failed:", err);
     const message = err instanceof Error ? err.message : String(err);
-    await logRun(admin, trigger, tally.sent, false, message);
+    const run = await logRun(admin, trigger, tally.sent, false, message);
+    // The alert also lists any individual sends that failed before the crash.
+    const details = [
+      `The run stopped with an error: ${err instanceof Error && err.stack ? err.stack : message}`,
+      ...tally.details,
+    ];
+    const alert = await sendFailureAlert(
+      trigger,
+      run,
+      `${message} (${tally.sent} reminder(s) had been sent before it stopped.)`,
+      details,
+    );
+    await recordAlertOutcome(admin, run, alert);
     return jsonResponse({ error: message, sent: tally.sent }, 500);
   }
 });
